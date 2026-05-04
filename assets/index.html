@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PropFirm Trade Watcher</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .status-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-indicator.running {
+            background: #10B981;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.stopped {
+            background: #EF4444;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .tabs {
+            display: flex;
+            background: white;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .tab {
+            flex: 1;
+            padding: 15px;
+            background: #f8f9fa;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .tab.active {
+            background: #667eea;
+            color: white;
+        }
+        
+        .tab-content {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            min-height: 400px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .folder-input {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .folder-input input {
+            flex: 1;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5a6fd8;
+        }
+        
+        .btn-secondary {
+            background: #6B7280;
+            color: white;
+        }
+        
+        .btn-success {
+            background: #10B981;
+            color: white;
+        }
+        
+        .btn-danger {
+            background: #EF4444;
+            color: white;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .log-container {
+            background: #1a1a1a;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            height: 300px;
+            overflow-y: auto;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+        }
+        
+        .log-entry.error {
+            color: #ff6b6b;
+        }
+        
+        .log-entry.warn {
+            color: #feca57;
+        }
+        
+        .folder-list {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            max-height: 150px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+        }
+        
+        .folder-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .folder-item:last-child {
+            border-bottom: none;
+        }
+        
+        .remove-folder {
+            background: #EF4444;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: white;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+        
+        .notification.success {
+            background: #10B981;
+        }
+        
+        .notification.error {
+            background: #EF4444;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>PropFirm Trade Watcher</h1>
+            <p>Automated MT4 trade import system</p>
+        </div>
+        
+        <div class="status-card">
+            <h3>
+                <span id="statusIndicator" class="status-indicator stopped"></span>
+                <span id="statusText">File Watcher Stopped</span>
+            </h3>
+            <div style="margin-top: 15px;">
+                <button id="startBtn" class="btn-success">Start Watching</button>
+                <button id="stopBtn" class="btn-danger" disabled>Stop Watching</button>
+                <button id="refreshBtn" class="btn-secondary">Refresh Status</button>
+            </div>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab active" data-tab="overview">Overview</button>
+            <button class="tab" data-tab="settings">Settings</button>
+            <button class="tab" data-tab="logs">Logs</button>
+        </div>
+        
+        <div id="overviewTab" class="tab-content">
+            <h3>Statistics</h3>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div id="filesProcessed" class="stat-value">0</div>
+                    <div class="stat-label">Files Processed</div>
+                </div>
+                <div class="stat-item">
+                    <div id="tradesImported" class="stat-value">0</div>
+                    <div class="stat-label">Trades Imported</div>
+                </div>
+                <div class="stat-item">
+                    <div id="errorsCount" class="stat-value">0</div>
+                    <div class="stat-label">Errors</div>
+                </div>
+                <div class="stat-item">
+                    <div id="watchedFolders" class="stat-value">0</div>
+                    <div class="stat-label">Watched Folders</div>
+                </div>
+            </div>
+            
+            <h3>Last Activity</h3>
+            <div id="lastProcessed" style="padding: 15px; background: #f8f9fa; border-radius: 8px; margin-top: 10px;">
+                No activity yet
+            </div>
+        </div>
+        
+        <div id="settingsTab" class="tab-content hidden">
+            <form id="settingsForm">
+                <div class="form-group">
+                    <label for="apiUrl">Web App URL</label>
+                    <input type="url" id="apiUrl" placeholder="http://localhost:3000" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="apiKey">API Key</label>
+                    <input type="password" id="apiKey" placeholder="Enter API key">
+                    <button type="button" id="testApiBtn" class="btn-secondary" style="margin-top: 10px;">Test Connection</button>
+                    <div id="apiKeyStatus" class="hidden" style="margin-top: 10px; padding: 10px; border-radius: 5px; background: #f0f9ff; border: 1px solid #0ea5e9;">
+                        <div id="apiKeyName" style="font-weight: 500; color: #0369a1;"></div>
+                        <div id="watcherId" style="font-size: 12px; color: #64748b; margin-top: 5px;"></div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Watch Folders</label>
+                    <div id="folderList" class="folder-list"></div>
+                    <div class="folder-input">
+                        <input type="text" id="newFolder" placeholder="C:\MT4_Exports">
+                        <button type="button" id="browseFolder" class="btn-secondary">Browse</button>
+                        <button type="button" id="addFolder" class="btn-primary">Add</button>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="logLevel">Log Level</label>
+                    <select id="logLevel">
+                        <option value="debug">Debug</option>
+                        <option value="info">Info</option>
+                        <option value="warn">Warning</option>
+                        <option value="error">Error</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="autoStart"> Start watching automatically
+                    </label>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="notifications"> Show notifications
+                    </label>
+                </div>
+                
+                <button type="submit" class="btn-primary">Save Settings</button>
+            </form>
+        </div>
+        
+        <div id="logsTab" class="tab-content hidden">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3>Recent Logs</h3>
+                <button id="refreshLogs" class="btn-secondary">Refresh</button>
+            </div>
+            <div id="logContainer" class="log-container">
+                Loading logs...
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Global state
+        let currentSettings = {};
+        let refreshInterval;
+        
+        // Wait for DOM to load
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initializeApp();
+            setupEventListeners();
+            startAutoRefresh();
+        });
+        
+        async function initializeApp() {
+            try {
+                // Load initial settings
+                currentSettings = await window.watcherAPI.getSettings();
+                updateUI();
+                await refreshStats();
+                await refreshLogs();
+                
+                // Show API key status if configured
+                updateApiKeyStatus();
+            } catch (error) {
+                showNotification('Failed to initialize app: ' + error.message, 'error');
+            }
+        }
+        
+        function setupEventListeners() {
+            // Tab switching
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+            });
+            
+            // Control buttons
+            document.getElementById('startBtn').addEventListener('click', startWatching);
+            document.getElementById('stopBtn').addEventListener('click', stopWatching);
+            document.getElementById('refreshBtn').addEventListener('click', refreshStats);
+            
+            // Settings form
+            document.getElementById('settingsForm').addEventListener('submit', saveSettings);
+            document.getElementById('testApiBtn').addEventListener('click', testApiConnection);
+            document.getElementById('browseFolder').addEventListener('click', browseFolder);
+            document.getElementById('addFolder').addEventListener('click', addFolder);
+            
+            // Logs
+            document.getElementById('refreshLogs').addEventListener('click', refreshLogs);
+        }
+        
+        function updateUI() {
+            updateStatusIndicators();
+            
+            // Update settings form only if fields are empty (to prevent overwriting user input)
+            const apiUrlField = document.getElementById('apiUrl');
+            const apiKeyField = document.getElementById('apiKey');
+            
+            if (!apiUrlField.value) {
+                apiUrlField.value = currentSettings.apiUrl || '';
+            }
+            if (!apiKeyField.value) {
+                apiKeyField.value = currentSettings.apiKey || '';
+            }
+            
+            document.getElementById('logLevel').value = currentSettings.logLevel || 'info';
+            document.getElementById('autoStart').checked = currentSettings.autoStart || false;
+            document.getElementById('notifications').checked = currentSettings.notifications || false;
+            
+            // Update folder list
+            updateFolderList();
+        }
+        
+        function updateStatusIndicators() {
+            // Update status indicators only
+            const isRunning = currentSettings.isWatching;
+            const statusIndicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            
+            if (isRunning) {
+                statusIndicator.className = 'status-indicator running';
+                statusText.textContent = 'File Watcher Running';
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+            } else {
+                statusIndicator.className = 'status-indicator stopped';
+                statusText.textContent = 'File Watcher Stopped';
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
+        }
+        
+        function updateFolderList() {
+            const folderList = document.getElementById('folderList');
+            const folders = currentSettings.watchFolders || [];
+            
+            folderList.innerHTML = '';
+            
+            folders.forEach((folder, index) => {
+                const folderItem = document.createElement('div');
+                folderItem.className = 'folder-item';
+                folderItem.innerHTML = `
+                    <span>${folder}</span>
+                    <button class="remove-folder" onclick="removeFolder(${index})">Remove</button>
+                `;
+                folderList.appendChild(folderItem);
+            });
+            
+            if (folders.length === 0) {
+                folderList.innerHTML = '<div class="folder-item">No folders added yet</div>';
+            }
+        }
+        
+        async function startWatching() {
+            try {
+                const result = await window.watcherAPI.startWatching();
+                if (result.success) {
+                    showNotification('File watching started', 'success');
+                    currentSettings.isWatching = true;
+                    updateUI();
+                } else {
+                    showNotification('Failed to start watching: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showNotification('Error starting watcher: ' + error.message, 'error');
+            }
+        }
+        
+        async function stopWatching() {
+            try {
+                const result = await window.watcherAPI.stopWatching();
+                if (result.success) {
+                    showNotification('File watching stopped', 'success');
+                    currentSettings.isWatching = false;
+                    updateUI();
+                } else {
+                    showNotification('Failed to stop watching: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showNotification('Error stopping watcher: ' + error.message, 'error');
+            }
+        }
+        
+        async function refreshStats() {
+            try {
+                const stats = await window.watcherAPI.getStats();
+                
+                document.getElementById('filesProcessed').textContent = stats.filesProcessed;
+                document.getElementById('tradesImported').textContent = stats.tradesImported;
+                document.getElementById('errorsCount').textContent = stats.errors;
+                document.getElementById('watchedFolders').textContent = stats.watchedFolders?.length || 0;
+                
+                const lastProcessed = document.getElementById('lastProcessed');
+                if (stats.lastProcessed) {
+                    const date = new Date(stats.lastProcessed);
+                    lastProcessed.textContent = `Last processed: ${date.toLocaleString()}`;
+                } else {
+                    lastProcessed.textContent = 'No activity yet';
+                }
+                
+                currentSettings.isWatching = stats.isRunning;
+                
+                // Only update status indicators, not the entire UI form
+                updateStatusIndicators();
+            } catch (error) {
+                console.error('Error refreshing stats:', error);
+            }
+        }
+        
+        async function refreshLogs() {
+            try {
+                const logs = await window.watcherAPI.getLogs();
+                const logContainer = document.getElementById('logContainer');
+                
+                logContainer.innerHTML = '';
+                
+                logs.forEach(log => {
+                    const logEntry = document.createElement('div');
+                    logEntry.className = `log-entry ${log.level}`;
+                    logEntry.textContent = `[${new Date(log.timestamp).toLocaleTimeString()}] [${log.level.toUpperCase()}] ${log.message}`;
+                    logContainer.appendChild(logEntry);
+                });
+                
+                // Scroll to bottom
+                logContainer.scrollTop = logContainer.scrollHeight;
+            } catch (error) {
+                console.error('Error refreshing logs:', error);
+            }
+        }
+        
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+            document.getElementById(`${tabName}Tab`).classList.remove('hidden');
+        }
+        
+        async function saveSettings(event) {
+            event.preventDefault();
+            
+            const formData = new FormData(event.target);
+            const settings = {
+                apiUrl: document.getElementById('apiUrl').value,
+                apiKey: document.getElementById('apiKey').value,
+                watchFolders: currentSettings.watchFolders || [],
+                logLevel: document.getElementById('logLevel').value,
+                autoStart: document.getElementById('autoStart').checked,
+                notifications: document.getElementById('notifications').checked
+            };
+            
+            try {
+                const result = await window.watcherAPI.saveSettings(settings);
+                if (result.success) {
+                    currentSettings = { ...currentSettings, ...settings };
+                    showNotification('Settings saved successfully', 'success');
+                } else {
+                    showNotification('Failed to save settings', 'error');
+                }
+            } catch (error) {
+                showNotification('Error saving settings: ' + error.message, 'error');
+            }
+        }
+        
+        async function testApiConnection() {
+            const apiUrl = document.getElementById('apiUrl').value;
+            const apiKey = document.getElementById('apiKey').value;
+            
+            if (!apiUrl) {
+                showNotification('Please enter API URL', 'error');
+                return;
+            }
+            
+            // Update current settings with form values to prevent them from being cleared
+            currentSettings.apiUrl = apiUrl;
+            currentSettings.apiKey = apiKey;
+            
+            try {
+                const result = await window.watcherAPI.testApi(apiUrl, apiKey);
+                if (result.success) {
+                    showNotification(`API connection successful`, 'success');
+                    
+                    // Store API key name for display
+                    currentSettings.apiKeyName = result.message || 'Connected';
+                    updateApiKeyStatus();
+                } else {
+                    showNotification('API connection failed: ' + result.error, 'error');
+                    hideApiKeyStatus();
+                }
+            } catch (error) {
+                showNotification('Error testing API: ' + error.message, 'error');
+                hideApiKeyStatus();
+            }
+        }
+        
+        function updateApiKeyStatus() {
+            const apiKeyStatus = document.getElementById('apiKeyStatus');
+            const apiKeyName = document.getElementById('apiKeyName');
+            const watcherIdElement = document.getElementById('watcherId');
+            
+            if (currentSettings.apiKey && currentSettings.apiKey.trim().length > 0) {
+                apiKeyName.textContent = `Connected: ${currentSettings.apiKeyName || 'API Key Configured'}`;
+                watcherIdElement.textContent = `Watcher ID: ${currentSettings.watcherId || 'Not available'}`;
+                apiKeyStatus.classList.remove('hidden');
+            } else {
+                apiKeyStatus.classList.add('hidden');
+            }
+        }
+        
+        function hideApiKeyStatus() {
+            const apiKeyStatus = document.getElementById('apiKeyStatus');
+            apiKeyStatus.classList.add('hidden');
+        }
+        
+        async function browseFolder() {
+            try {
+                const result = await window.watcherAPI.selectFolder();
+                if (result.success && result.path) {
+                    document.getElementById('newFolder').value = result.path;
+                }
+            } catch (error) {
+                showNotification('Error selecting folder: ' + error.message, 'error');
+            }
+        }
+        
+        function addFolder() {
+            const newFolderInput = document.getElementById('newFolder');
+            const newFolder = newFolderInput.value.trim();
+            
+            if (!newFolder) {
+                showNotification('Please enter a folder path', 'error');
+                return;
+            }
+            
+            if (!currentSettings.watchFolders) {
+                currentSettings.watchFolders = [];
+            }
+            
+            if (currentSettings.watchFolders.includes(newFolder)) {
+                showNotification('Folder already added', 'error');
+                return;
+            }
+            
+            currentSettings.watchFolders.push(newFolder);
+            newFolderInput.value = '';
+            updateFolderList();
+            showNotification('Folder added', 'success');
+        }
+        
+        function removeFolder(index) {
+            if (currentSettings.watchFolders) {
+                currentSettings.watchFolders.splice(index, 1);
+                updateFolderList();
+                showNotification('Folder removed', 'success');
+            }
+        }
+        
+        function showNotification(message, type) {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                document.body.removeChild(notification);
+            }, 3000);
+        }
+        
+        function startAutoRefresh() {
+            refreshInterval = setInterval(() => {
+                refreshStats();
+            }, 10000); // Refresh every 10 seconds
+        }
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+            if (window.watcherAPI.removeAllListeners) {
+                window.watcherAPI.removeAllListeners();
+            }
+        });
+    </script>
+</body>
+</html>

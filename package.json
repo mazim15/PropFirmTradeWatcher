@@ -1,0 +1,81 @@
+{
+  "name": "propfirm-trade-watcher",
+  "version": "1.1.0",
+  "description": "Automated file watcher for PropFirm trade imports",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "dev": "concurrently \"tsc --watch\" \"electron .\"",
+    "pack": "electron-builder",
+    "dist": "npm run build && electron-builder",
+    "release": "npm run build && electron-builder --publish=always",
+    "clean": "rimraf dist"
+  },
+  "keywords": [
+    "propfirm",
+    "trading",
+    "file-watcher",
+    "mt4",
+    "automation"
+  ],
+  "author": "PropFirm Trade Tracker",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "concurrently": "^9.2.1",
+    "electron": "^38.1.0",
+    "electron-builder": "^26.0.12",
+    "rimraf": "^5.0.1",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "axios": "^1.11.0",
+    "chokidar": "^3.5.3",
+    "csv-parser": "^3.2.0",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.8.3",
+    "node-notifier": "^10.0.1"
+  },
+  "build": {
+    "appId": "com.propfirm.trade-watcher",
+    "productName": "PropFirm Trade Watcher",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "forceCodeSigning": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "differentialPackage": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "mazim15",
+        "repo": "PropFirmTradeWatcher",
+        "private": true,
+        "releaseType": "release"
+      }
+    ],
+    "npmRebuild": false,
+    "buildDependenciesFromSource": false,
+    "nodeGypRebuild": false
+  }
+}

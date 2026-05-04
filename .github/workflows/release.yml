@@ -1,0 +1,31 @@
+name: Release Watcher
+
+# Triggers on push of a v* tag (e.g. v1.1.0). electron-builder uploads the
+# NSIS installer + latest.yml to a draft GitHub Release; promote to
+# published when ready and the in-app updater will pick it up.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build & publish
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: npm run release
