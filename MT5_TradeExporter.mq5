@@ -10,7 +10,7 @@
 //--- Input parameters
 input int  ExportIntervalMinutes        = 1;     // Closed trades export interval (minutes)
 input int  OpenTradesIntervalSeconds    = 30;    // Open trades export interval (seconds)
-input int  AccountStateIntervalSeconds  = 5;     // Account state (equity/margin) export cadence
+input int  AccountStateIntervalSeconds  = 60;    // Account state (equity/margin) export cadence
 input bool EnableExport                 = true;  // Enable/disable closed trades export
 input bool EnableOpenTrades             = true;  // Enable/disable open trades export
 input bool EnableAccountState           = true;  // Enable/disable live account state export
