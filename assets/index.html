@@ -1,732 +1,996 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PropFirm Trade Watcher</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-            background: #f5f5f5;
-            color: #333;
-        }
-        
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-        
-        .status-card {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        
-        .status-indicator {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            margin-right: 8px;
-        }
-        
-        .status-indicator.running {
-            background: #10B981;
-            animation: pulse 2s infinite;
-        }
-        
-        .status-indicator.stopped {
-            background: #EF4444;
-        }
-        
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-        
-        .tabs {
-            display: flex;
-            background: white;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            overflow: hidden;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        
-        .tab {
-            flex: 1;
-            padding: 15px;
-            background: #f8f9fa;
-            border: none;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .tab.active {
-            background: #667eea;
-            color: white;
-        }
-        
-        .tab-content {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            min-height: 400px;
-        }
-        
-        .form-group {
-            margin-bottom: 15px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 500;
-        }
-        
-        input, select, textarea {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 14px;
-        }
-        
-        .folder-input {
-            display: flex;
-            gap: 10px;
-        }
-        
-        .folder-input input {
-            flex: 1;
-        }
-        
-        button {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.3s;
-        }
-        
-        .btn-primary {
-            background: #667eea;
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background: #5a6fd8;
-        }
-        
-        .btn-secondary {
-            background: #6B7280;
-            color: white;
-        }
-        
-        .btn-success {
-            background: #10B981;
-            color: white;
-        }
-        
-        .btn-danger {
-            background: #EF4444;
-            color: white;
-        }
-        
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .stat-item {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        
-        .stat-value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #667eea;
-        }
-        
-        .stat-label {
-            font-size: 12px;
-            color: #666;
-            margin-top: 5px;
-        }
-        
-        .log-container {
-            background: #1a1a1a;
-            color: #00ff00;
-            padding: 15px;
-            border-radius: 8px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            height: 300px;
-            overflow-y: auto;
-        }
-        
-        .log-entry {
-            margin-bottom: 5px;
-        }
-        
-        .log-entry.error {
-            color: #ff6b6b;
-        }
-        
-        .log-entry.warn {
-            color: #feca57;
-        }
-        
-        .folder-list {
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            max-height: 150px;
-            overflow-y: auto;
-            margin-bottom: 10px;
-        }
-        
-        .folder-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .folder-item:last-child {
-            border-bottom: none;
-        }
-        
-        .remove-folder {
-            background: #EF4444;
-            color: white;
-            border: none;
-            padding: 5px 10px;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-        
-        .notification {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 15px 20px;
-            border-radius: 8px;
-            color: white;
-            z-index: 1000;
-            animation: slideIn 0.3s ease;
-        }
-        
-        .notification.success {
-            background: #10B981;
-        }
-        
-        .notification.error {
-            background: #EF4444;
-        }
-        
-        @keyframes slideIn {
-            from { transform: translateX(100%); }
-            to { transform: translateX(0); }
-        }
-        
-        .hidden {
-            display: none;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PropFirm Trade Watcher</title>
+<style>
+  :root {
+    --bg: #09090b;
+    --surface: #131316;
+    --surface-2: #1c1c21;
+    --surface-3: #25252b;
+    --border: #27272a;
+    --border-strong: #3f3f46;
+    --text: #fafafa;
+    --text-muted: #a1a1aa;
+    --text-subtle: #71717a;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --accent-soft: rgba(59, 130, 246, 0.12);
+    --success: #10b981;
+    --success-soft: rgba(16, 185, 129, 0.12);
+    --warning: #f59e0b;
+    --warning-soft: rgba(245, 158, 11, 0.12);
+    --danger: #ef4444;
+    --danger-soft: rgba(239, 68, 68, 0.12);
+    --radius: 8px;
+    --radius-lg: 10px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Inter, Roboto, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body { display: flex; flex-direction: column; min-height: 100vh; }
+
+  /* Header */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .topbar .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 600; font-size: 13px; letter-spacing: -0.01em;
+  }
+  .topbar .brand-dot {
+    width: 8px; height: 8px; border-radius: 2px;
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+  }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-subtle);
+    box-shadow: 0 0 0 0 transparent;
+    transition: background 0.2s, box-shadow 0.2s;
+  }
+  .status-pill.running .status-dot {
+    background: var(--success);
+    box-shadow: 0 0 0 3px var(--success-soft);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .status-pill.running { color: var(--text); }
+  .status-pill.stopped .status-dot { background: var(--text-subtle); }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 3px var(--success-soft); }
+    50% { box-shadow: 0 0 0 6px transparent; }
+  }
+
+  /* Update banner */
+  #updateBanner {
+    display: none;
+    padding: 10px 20px;
+    background: var(--accent-soft);
+    border-bottom: 1px solid var(--accent);
+    color: var(--text);
+    font-size: 12px;
+  }
+  #updateBanner strong { color: var(--accent); }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    gap: 4px;
+  }
+  .tab {
+    padding: 12px 14px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.15s;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab svg { width: 14px; height: 14px; }
+
+  /* Content area */
+  main {
+    flex: 1;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+  }
+
+  .panel { display: none; flex-direction: column; gap: 16px; }
+  .panel.active { display: flex; }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+  }
+  .card h3 {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-subtle);
+    margin-bottom: 12px;
+  }
+  .card.compact { padding: 14px; }
+
+  /* Status card with controls */
+  .status-card {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px;
+  }
+  .status-card .left { display: flex; flex-direction: column; gap: 4px; }
+  .status-card .label { font-size: 11px; color: var(--text-subtle); text-transform: uppercase; letter-spacing: 0.05em; }
+  .status-card .value { font-size: 18px; font-weight: 600; }
+  .status-card .actions { display: flex; gap: 8px; }
+
+  /* Stats grid */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+  }
+  .stat .stat-label {
+    font-size: 11px; color: var(--text-subtle);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+  .stat .stat-value {
+    font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .stat.warning .stat-value { color: var(--warning); }
+  .stat.danger .stat-value { color: var(--danger); }
+  .stat .stat-sub {
+    font-size: 11px; color: var(--text-subtle); margin-top: 4px;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 7px 12px;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+    font-family: inherit;
+  }
+  .btn:hover:not(:disabled) { background: var(--surface-3); border-color: #52525b; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn svg { width: 13px; height: 13px; }
+  .btn.primary {
+    background: var(--accent); border-color: var(--accent); color: white;
+  }
+  .btn.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .btn.success {
+    background: var(--success); border-color: var(--success); color: white;
+  }
+  .btn.success:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn.danger {
+    background: var(--danger); border-color: var(--danger); color: white;
+  }
+  .btn.danger:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn.ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+  .btn.ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+
+  /* Inputs */
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  .field .hint { font-size: 11px; color: var(--text-subtle); }
+  input[type="text"], input[type="url"], input[type="password"], select {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-family: inherit;
+    transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  input:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
+
+  .field-row { display: flex; gap: 8px; align-items: stretch; }
+  .field-row > input { flex: 1; }
+
+  /* Folder list */
+  .folder-list { display: flex; flex-direction: column; gap: 6px; }
+  .folder-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .folder-row .remove {
+    color: var(--text-subtle); cursor: pointer; padding: 4px 8px; border-radius: 4px;
+    background: transparent; border: none; font-size: 11px;
+  }
+  .folder-row .remove:hover { background: var(--danger-soft); color: var(--danger); }
+  .empty-state {
+    padding: 20px; text-align: center; color: var(--text-subtle); font-size: 12px;
+    background: var(--bg); border: 1px dashed var(--border-strong); border-radius: var(--radius);
+  }
+
+  /* Form sections */
+  .section-stack { display: flex; flex-direction: column; gap: 14px; }
+  .section-stack > .section-title {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-subtle); padding-bottom: 6px; border-bottom: 1px solid var(--border);
+  }
+
+  /* API key status */
+  .api-status {
+    display: none;
+    padding: 10px;
+    background: var(--success-soft);
+    border: 1px solid var(--success);
+    border-radius: var(--radius);
+    font-size: 12px;
+    margin-top: 8px;
+  }
+  .api-status.show { display: block; }
+  .api-status .name { color: var(--success); font-weight: 500; margin-bottom: 4px; }
+  .api-status .id {
+    color: var(--text-subtle); font-size: 11px;
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  }
+
+  /* Logs */
+  .log-toolbar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px;
+  }
+  .log-container {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.6;
+    height: 380px;
+    overflow-y: auto;
+    color: var(--text-muted);
+  }
+  .log-line { display: flex; gap: 10px; }
+  .log-line .log-time { color: var(--text-subtle); flex-shrink: 0; }
+  .log-line .log-level { width: 50px; flex-shrink: 0; font-weight: 600; text-transform: uppercase; font-size: 10px; }
+  .log-line .log-msg { color: var(--text-muted); word-break: break-word; }
+  .log-line.debug .log-level { color: var(--text-subtle); }
+  .log-line.info  .log-level { color: var(--accent); }
+  .log-line.warn  .log-level { color: var(--warning); }
+  .log-line.warn  .log-msg   { color: var(--text); }
+  .log-line.error .log-level { color: var(--danger); }
+  .log-line.error .log-msg   { color: var(--text); }
+
+  /* Symbol map */
+  .symbol-map-list { display: flex; flex-direction: column; gap: 8px; }
+  .symbol-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .symbol-row .canonical {
+    font-weight: 600; font-size: 13px; min-width: 90px;
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  }
+  .symbol-row .arrow { color: var(--text-subtle); font-size: 13px; }
+  .symbol-row .variants { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+  .variant-chip {
+    padding: 3px 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 11px;
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+    color: var(--text-muted);
+  }
+
+  /* Activity row */
+  .activity {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .activity .activity-label { color: var(--text-subtle); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .activity .activity-value { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace; color: var(--text); }
+
+  /* Watcher info row */
+  .info-row {
+    display: flex; gap: 16px; padding: 10px 14px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    font-size: 11px; color: var(--text-subtle);
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  }
+  .info-row .info-pair { display: flex; gap: 6px; }
+  .info-row .info-pair .info-key { color: var(--text-subtle); }
+  .info-row .info-pair .info-val { color: var(--text-muted); }
+
+  /* Toasts */
+  .toasts {
+    position: fixed; bottom: 16px; right: 16px;
+    display: flex; flex-direction: column-reverse; gap: 8px;
+    z-index: 100;
+    pointer-events: none;
+  }
+  .toast {
+    pointer-events: auto;
+    min-width: 220px; max-width: 360px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    animation: toast-in 0.2s ease;
+  }
+  .toast.success { border-color: var(--success); }
+  .toast.success::before { content: "✓ "; color: var(--success); font-weight: 700; }
+  .toast.error { border-color: var(--danger); }
+  .toast.error::before { content: "✕ "; color: var(--danger); font-weight: 700; }
+  @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  /* Inline checkbox row */
+  .check-row {
+    display: flex; align-items: center; gap: 10px; padding: 4px 0;
+  }
+  .check-row label { font-size: 13px; color: var(--text); cursor: pointer; }
+  .check-row .hint { font-size: 11px; color: var(--text-subtle); margin-top: 2px; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 5px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: #525258; }
+</style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>PropFirm Trade Watcher</h1>
-            <p>Automated MT4 trade import system</p>
-        </div>
-        
-        <div class="status-card">
-            <h3>
-                <span id="statusIndicator" class="status-indicator stopped"></span>
-                <span id="statusText">File Watcher Stopped</span>
-            </h3>
-            <div style="margin-top: 15px;">
-                <button id="startBtn" class="btn-success">Start Watching</button>
-                <button id="stopBtn" class="btn-danger" disabled>Stop Watching</button>
-                <button id="refreshBtn" class="btn-secondary">Refresh Status</button>
-            </div>
-        </div>
-        
-        <div class="tabs">
-            <button class="tab active" data-tab="overview">Overview</button>
-            <button class="tab" data-tab="settings">Settings</button>
-            <button class="tab" data-tab="logs">Logs</button>
-        </div>
-        
-        <div id="overviewTab" class="tab-content">
-            <h3>Statistics</h3>
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <div id="filesProcessed" class="stat-value">0</div>
-                    <div class="stat-label">Files Processed</div>
-                </div>
-                <div class="stat-item">
-                    <div id="tradesImported" class="stat-value">0</div>
-                    <div class="stat-label">Trades Imported</div>
-                </div>
-                <div class="stat-item">
-                    <div id="errorsCount" class="stat-value">0</div>
-                    <div class="stat-label">Errors</div>
-                </div>
-                <div class="stat-item">
-                    <div id="watchedFolders" class="stat-value">0</div>
-                    <div class="stat-label">Watched Folders</div>
-                </div>
-            </div>
-            
-            <h3>Last Activity</h3>
-            <div id="lastProcessed" style="padding: 15px; background: #f8f9fa; border-radius: 8px; margin-top: 10px;">
-                No activity yet
-            </div>
-        </div>
-        
-        <div id="settingsTab" class="tab-content hidden">
-            <form id="settingsForm">
-                <div class="form-group">
-                    <label for="apiUrl">Web App URL</label>
-                    <input type="url" id="apiUrl" placeholder="http://localhost:3000" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="apiKey">API Key</label>
-                    <input type="password" id="apiKey" placeholder="Enter API key">
-                    <button type="button" id="testApiBtn" class="btn-secondary" style="margin-top: 10px;">Test Connection</button>
-                    <div id="apiKeyStatus" class="hidden" style="margin-top: 10px; padding: 10px; border-radius: 5px; background: #f0f9ff; border: 1px solid #0ea5e9;">
-                        <div id="apiKeyName" style="font-weight: 500; color: #0369a1;"></div>
-                        <div id="watcherId" style="font-size: 12px; color: #64748b; margin-top: 5px;"></div>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label>Watch Folders</label>
-                    <div id="folderList" class="folder-list"></div>
-                    <div class="folder-input">
-                        <input type="text" id="newFolder" placeholder="C:\MT4_Exports">
-                        <button type="button" id="browseFolder" class="btn-secondary">Browse</button>
-                        <button type="button" id="addFolder" class="btn-primary">Add</button>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="logLevel">Log Level</label>
-                    <select id="logLevel">
-                        <option value="debug">Debug</option>
-                        <option value="info">Info</option>
-                        <option value="warn">Warning</option>
-                        <option value="error">Error</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="autoStart"> Start watching automatically
-                    </label>
-                </div>
-                
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="notifications"> Show notifications
-                    </label>
-                </div>
-                
-                <button type="submit" class="btn-primary">Save Settings</button>
-            </form>
-        </div>
-        
-        <div id="logsTab" class="tab-content hidden">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                <h3>Recent Logs</h3>
-                <button id="refreshLogs" class="btn-secondary">Refresh</button>
-            </div>
-            <div id="logContainer" class="log-container">
-                Loading logs...
-            </div>
-        </div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      PropFirm Trade Watcher
     </div>
-    
-    <script>
-        // Global state
-        let currentSettings = {};
-        let refreshInterval;
-        
-        // Wait for DOM to load
-        document.addEventListener('DOMContentLoaded', async () => {
-            await initializeApp();
-            setupEventListeners();
-            startAutoRefresh();
+    <span id="statusPill" class="status-pill stopped">
+      <span id="statusIndicator" class="status-dot"></span>
+      <span id="statusText">Stopped</span>
+    </span>
+  </header>
+
+  <div id="updateBanner">
+    <strong>Update available</strong> — version <span id="updateVersion"></span> downloaded. It will install on next quit.
+  </div>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="overview">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+      Overview
+    </button>
+    <button class="tab" data-tab="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Settings
+    </button>
+    <button class="tab" data-tab="symbol-map">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+      Symbol Map
+    </button>
+    <button class="tab" data-tab="logs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      Logs
+    </button>
+  </nav>
+
+  <main>
+    <!-- OVERVIEW -->
+    <section id="overviewPanel" class="panel active">
+      <div class="card status-card">
+        <div class="left">
+          <div class="label">File watcher</div>
+          <div class="value" id="statusValue">Stopped</div>
+        </div>
+        <div class="actions">
+          <button id="startBtn" class="btn success">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Start
+          </button>
+          <button id="stopBtn" class="btn danger" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+            Stop
+          </button>
+          <button id="refreshBtn" class="btn ghost" title="Refresh stats">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-label">Files processed</div>
+          <div class="stat-value" id="filesProcessed">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Closed trades</div>
+          <div class="stat-value" id="tradesImported">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Open trades</div>
+          <div class="stat-value" id="openTradesImported">0</div>
+        </div>
+        <div class="stat" id="errorsStat">
+          <div class="stat-label">Errors</div>
+          <div class="stat-value" id="errorsCount">0</div>
+          <div class="stat-sub" id="errorsSub"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Last activity</h3>
+        <div class="activity">
+          <span class="activity-label">Last processed</span>
+          <span class="activity-value" id="lastProcessed">No activity yet</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Watched folders <span style="color: var(--text-subtle); font-weight: 400; text-transform: none; letter-spacing: 0;">— <span id="watchedFolders">0</span> active</span></h3>
+        <div class="folder-list" id="overviewFolderList"></div>
+      </div>
+
+      <div class="info-row" id="watcherInfoRow">
+        <span class="info-pair"><span class="info-key">version</span><span class="info-val" id="watcherVersion">1.1.0</span></span>
+        <span class="info-pair"><span class="info-key">id</span><span class="info-val" id="watcherIdInfo">—</span></span>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="settingsPanel" class="panel">
+      <form id="settingsForm" class="section-stack" autocomplete="off">
+        <div class="card">
+          <h3>Connection</h3>
+          <div class="section-stack">
+            <div class="field">
+              <label for="apiUrl">Web app URL</label>
+              <input type="url" id="apiUrl" placeholder="https://your-app.example.com" required>
+              <span class="hint">No trailing slash. The same URL you use to open your dashboard.</span>
+            </div>
+            <div class="field">
+              <label for="apiKey">API key</label>
+              <input type="password" id="apiKey" placeholder="pfm_xxxxxxxxxxxxx" autocomplete="new-password">
+              <div style="display:flex; gap: 8px; align-items:center;">
+                <button type="button" id="testApiBtn" class="btn">Test connection</button>
+              </div>
+              <div id="apiKeyStatus" class="api-status">
+                <div class="name" id="apiKeyName"></div>
+                <div class="id" id="watcherId"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Watch folders</h3>
+          <div class="field">
+            <span class="hint">By default this is your MetaQuotes Common\Files folder. The EAs (with <code>UseCommonFolder=true</code>) write all trade files here.</span>
+            <div class="folder-list" id="folderList" style="margin-top: 8px;"></div>
+            <div class="field-row">
+              <input type="text" id="newFolder" placeholder="C:\Users\...\Common\Files">
+              <button type="button" id="browseFolder" class="btn">Browse</button>
+              <button type="button" id="addFolder" class="btn primary">Add</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Behavior</h3>
+          <div class="section-stack">
+            <div class="field">
+              <label for="logLevel">Log verbosity</label>
+              <select id="logLevel">
+                <option value="debug">Debug — log everything</option>
+                <option value="info">Info — default</option>
+                <option value="warn">Warning — only issues</option>
+                <option value="error">Error — only failures</option>
+              </select>
+            </div>
+            <div class="check-row">
+              <input type="checkbox" id="autoStart">
+              <label for="autoStart">Start watcher automatically when this PC boots</label>
+            </div>
+            <div class="check-row">
+              <input type="checkbox" id="notifications">
+              <label for="notifications">Show desktop notifications when trades import</label>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px;">
+          <button type="submit" class="btn primary">Save settings</button>
+          <button type="button" class="btn ghost" id="checkUpdatesBtn">Check for updates</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- SYMBOL MAP -->
+    <section id="symbol-mapPanel" class="panel">
+      <div class="card">
+        <h3>Broker symbol map</h3>
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+          Maps broker-side symbol variants (XAUUSDm, XAUUSD.r, GOLD#) to canonical names. Edit this in the web app's Settings → Symbol Map page; the watcher pulls it on startup and on each heartbeat.
+        </div>
+        <div class="symbol-map-list" id="symbolMapList">
+          <div class="empty-state">Loading symbol map…</div>
+        </div>
+        <div style="margin-top: 12px;">
+          <button id="refreshSymbolMapBtn" class="btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Refresh from web app
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- LOGS -->
+    <section id="logsPanel" class="panel">
+      <div class="card" style="padding: 14px;">
+        <div class="log-toolbar">
+          <h3 style="margin: 0;">Recent logs</h3>
+          <button id="refreshLogs" class="btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Refresh
+          </button>
+        </div>
+        <div id="logContainer" class="log-container">
+          <div class="log-line"><span class="log-msg">Loading logs…</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script>
+    let currentSettings = {};
+    let refreshInterval;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await initialize();
+      setupListeners();
+      startAutoRefresh();
+      setupUpdateListeners();
+    });
+
+    async function initialize() {
+      try {
+        currentSettings = await window.watcherAPI.getSettings();
+        applySettingsToForm();
+        await refreshStats();
+        await refreshLogs();
+        await refreshSymbolMap();
+        updateApiKeyStatus();
+        document.getElementById('watcherIdInfo').textContent = currentSettings.watcherId || '—';
+      } catch (e) {
+        toast('Failed to initialize: ' + e.message, 'error');
+      }
+    }
+
+    function setupListeners() {
+      document.querySelectorAll('.tab').forEach(t =>
+        t.addEventListener('click', () => switchTab(t.dataset.tab))
+      );
+      document.getElementById('startBtn').addEventListener('click', startWatching);
+      document.getElementById('stopBtn').addEventListener('click', stopWatching);
+      document.getElementById('refreshBtn').addEventListener('click', refreshStats);
+      document.getElementById('settingsForm').addEventListener('submit', saveSettings);
+      document.getElementById('testApiBtn').addEventListener('click', testApiConnection);
+      document.getElementById('browseFolder').addEventListener('click', browseFolder);
+      document.getElementById('addFolder').addEventListener('click', addFolder);
+      document.getElementById('refreshLogs').addEventListener('click', refreshLogs);
+      document.getElementById('refreshSymbolMapBtn').addEventListener('click', refreshSymbolMap);
+      document.getElementById('checkUpdatesBtn').addEventListener('click', checkForUpdates);
+    }
+
+    function setupUpdateListeners() {
+      if (window.watcherAPI.onUpdateAvailable) {
+        window.watcherAPI.onUpdateAvailable((info) => {
+          toast(`Update v${info?.version || ''} downloading…`, 'success');
         });
-        
-        async function initializeApp() {
-            try {
-                // Load initial settings
-                currentSettings = await window.watcherAPI.getSettings();
-                updateUI();
-                await refreshStats();
-                await refreshLogs();
-                
-                // Show API key status if configured
-                updateApiKeyStatus();
-            } catch (error) {
-                showNotification('Failed to initialize app: ' + error.message, 'error');
-            }
-        }
-        
-        function setupEventListeners() {
-            // Tab switching
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-            });
-            
-            // Control buttons
-            document.getElementById('startBtn').addEventListener('click', startWatching);
-            document.getElementById('stopBtn').addEventListener('click', stopWatching);
-            document.getElementById('refreshBtn').addEventListener('click', refreshStats);
-            
-            // Settings form
-            document.getElementById('settingsForm').addEventListener('submit', saveSettings);
-            document.getElementById('testApiBtn').addEventListener('click', testApiConnection);
-            document.getElementById('browseFolder').addEventListener('click', browseFolder);
-            document.getElementById('addFolder').addEventListener('click', addFolder);
-            
-            // Logs
-            document.getElementById('refreshLogs').addEventListener('click', refreshLogs);
-        }
-        
-        function updateUI() {
-            updateStatusIndicators();
-            
-            // Update settings form only if fields are empty (to prevent overwriting user input)
-            const apiUrlField = document.getElementById('apiUrl');
-            const apiKeyField = document.getElementById('apiKey');
-            
-            if (!apiUrlField.value) {
-                apiUrlField.value = currentSettings.apiUrl || '';
-            }
-            if (!apiKeyField.value) {
-                apiKeyField.value = currentSettings.apiKey || '';
-            }
-            
-            document.getElementById('logLevel').value = currentSettings.logLevel || 'info';
-            document.getElementById('autoStart').checked = currentSettings.autoStart || false;
-            document.getElementById('notifications').checked = currentSettings.notifications || false;
-            
-            // Update folder list
-            updateFolderList();
-        }
-        
-        function updateStatusIndicators() {
-            // Update status indicators only
-            const isRunning = currentSettings.isWatching;
-            const statusIndicator = document.getElementById('statusIndicator');
-            const statusText = document.getElementById('statusText');
-            const startBtn = document.getElementById('startBtn');
-            const stopBtn = document.getElementById('stopBtn');
-            
-            if (isRunning) {
-                statusIndicator.className = 'status-indicator running';
-                statusText.textContent = 'File Watcher Running';
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
-            } else {
-                statusIndicator.className = 'status-indicator stopped';
-                statusText.textContent = 'File Watcher Stopped';
-                startBtn.disabled = false;
-                stopBtn.disabled = true;
-            }
-        }
-        
-        function updateFolderList() {
-            const folderList = document.getElementById('folderList');
-            const folders = currentSettings.watchFolders || [];
-            
-            folderList.innerHTML = '';
-            
-            folders.forEach((folder, index) => {
-                const folderItem = document.createElement('div');
-                folderItem.className = 'folder-item';
-                folderItem.innerHTML = `
-                    <span>${folder}</span>
-                    <button class="remove-folder" onclick="removeFolder(${index})">Remove</button>
-                `;
-                folderList.appendChild(folderItem);
-            });
-            
-            if (folders.length === 0) {
-                folderList.innerHTML = '<div class="folder-item">No folders added yet</div>';
-            }
-        }
-        
-        async function startWatching() {
-            try {
-                const result = await window.watcherAPI.startWatching();
-                if (result.success) {
-                    showNotification('File watching started', 'success');
-                    currentSettings.isWatching = true;
-                    updateUI();
-                } else {
-                    showNotification('Failed to start watching: ' + result.error, 'error');
-                }
-            } catch (error) {
-                showNotification('Error starting watcher: ' + error.message, 'error');
-            }
-        }
-        
-        async function stopWatching() {
-            try {
-                const result = await window.watcherAPI.stopWatching();
-                if (result.success) {
-                    showNotification('File watching stopped', 'success');
-                    currentSettings.isWatching = false;
-                    updateUI();
-                } else {
-                    showNotification('Failed to stop watching: ' + result.error, 'error');
-                }
-            } catch (error) {
-                showNotification('Error stopping watcher: ' + error.message, 'error');
-            }
-        }
-        
-        async function refreshStats() {
-            try {
-                const stats = await window.watcherAPI.getStats();
-                
-                document.getElementById('filesProcessed').textContent = stats.filesProcessed;
-                document.getElementById('tradesImported').textContent = stats.tradesImported;
-                document.getElementById('errorsCount').textContent = stats.errors;
-                document.getElementById('watchedFolders').textContent = stats.watchedFolders?.length || 0;
-                
-                const lastProcessed = document.getElementById('lastProcessed');
-                if (stats.lastProcessed) {
-                    const date = new Date(stats.lastProcessed);
-                    lastProcessed.textContent = `Last processed: ${date.toLocaleString()}`;
-                } else {
-                    lastProcessed.textContent = 'No activity yet';
-                }
-                
-                currentSettings.isWatching = stats.isRunning;
-                
-                // Only update status indicators, not the entire UI form
-                updateStatusIndicators();
-            } catch (error) {
-                console.error('Error refreshing stats:', error);
-            }
-        }
-        
-        async function refreshLogs() {
-            try {
-                const logs = await window.watcherAPI.getLogs();
-                const logContainer = document.getElementById('logContainer');
-                
-                logContainer.innerHTML = '';
-                
-                logs.forEach(log => {
-                    const logEntry = document.createElement('div');
-                    logEntry.className = `log-entry ${log.level}`;
-                    logEntry.textContent = `[${new Date(log.timestamp).toLocaleTimeString()}] [${log.level.toUpperCase()}] ${log.message}`;
-                    logContainer.appendChild(logEntry);
-                });
-                
-                // Scroll to bottom
-                logContainer.scrollTop = logContainer.scrollHeight;
-            } catch (error) {
-                console.error('Error refreshing logs:', error);
-            }
-        }
-        
-        function switchTab(tabName) {
-            // Update tab buttons
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
-            
-            // Update tab content
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.classList.add('hidden');
-            });
-            document.getElementById(`${tabName}Tab`).classList.remove('hidden');
-        }
-        
-        async function saveSettings(event) {
-            event.preventDefault();
-            
-            const formData = new FormData(event.target);
-            const settings = {
-                apiUrl: document.getElementById('apiUrl').value,
-                apiKey: document.getElementById('apiKey').value,
-                watchFolders: currentSettings.watchFolders || [],
-                logLevel: document.getElementById('logLevel').value,
-                autoStart: document.getElementById('autoStart').checked,
-                notifications: document.getElementById('notifications').checked
-            };
-            
-            try {
-                const result = await window.watcherAPI.saveSettings(settings);
-                if (result.success) {
-                    currentSettings = { ...currentSettings, ...settings };
-                    showNotification('Settings saved successfully', 'success');
-                } else {
-                    showNotification('Failed to save settings', 'error');
-                }
-            } catch (error) {
-                showNotification('Error saving settings: ' + error.message, 'error');
-            }
-        }
-        
-        async function testApiConnection() {
-            const apiUrl = document.getElementById('apiUrl').value;
-            const apiKey = document.getElementById('apiKey').value;
-            
-            if (!apiUrl) {
-                showNotification('Please enter API URL', 'error');
-                return;
-            }
-            
-            // Update current settings with form values to prevent them from being cleared
-            currentSettings.apiUrl = apiUrl;
-            currentSettings.apiKey = apiKey;
-            
-            try {
-                const result = await window.watcherAPI.testApi(apiUrl, apiKey);
-                if (result.success) {
-                    showNotification(`API connection successful`, 'success');
-                    
-                    // Store API key name for display
-                    currentSettings.apiKeyName = result.message || 'Connected';
-                    updateApiKeyStatus();
-                } else {
-                    showNotification('API connection failed: ' + result.error, 'error');
-                    hideApiKeyStatus();
-                }
-            } catch (error) {
-                showNotification('Error testing API: ' + error.message, 'error');
-                hideApiKeyStatus();
-            }
-        }
-        
-        function updateApiKeyStatus() {
-            const apiKeyStatus = document.getElementById('apiKeyStatus');
-            const apiKeyName = document.getElementById('apiKeyName');
-            const watcherIdElement = document.getElementById('watcherId');
-            
-            if (currentSettings.apiKey && currentSettings.apiKey.trim().length > 0) {
-                apiKeyName.textContent = `Connected: ${currentSettings.apiKeyName || 'API Key Configured'}`;
-                watcherIdElement.textContent = `Watcher ID: ${currentSettings.watcherId || 'Not available'}`;
-                apiKeyStatus.classList.remove('hidden');
-            } else {
-                apiKeyStatus.classList.add('hidden');
-            }
-        }
-        
-        function hideApiKeyStatus() {
-            const apiKeyStatus = document.getElementById('apiKeyStatus');
-            apiKeyStatus.classList.add('hidden');
-        }
-        
-        async function browseFolder() {
-            try {
-                const result = await window.watcherAPI.selectFolder();
-                if (result.success && result.path) {
-                    document.getElementById('newFolder').value = result.path;
-                }
-            } catch (error) {
-                showNotification('Error selecting folder: ' + error.message, 'error');
-            }
-        }
-        
-        function addFolder() {
-            const newFolderInput = document.getElementById('newFolder');
-            const newFolder = newFolderInput.value.trim();
-            
-            if (!newFolder) {
-                showNotification('Please enter a folder path', 'error');
-                return;
-            }
-            
-            if (!currentSettings.watchFolders) {
-                currentSettings.watchFolders = [];
-            }
-            
-            if (currentSettings.watchFolders.includes(newFolder)) {
-                showNotification('Folder already added', 'error');
-                return;
-            }
-            
-            currentSettings.watchFolders.push(newFolder);
-            newFolderInput.value = '';
-            updateFolderList();
-            showNotification('Folder added', 'success');
-        }
-        
-        function removeFolder(index) {
-            if (currentSettings.watchFolders) {
-                currentSettings.watchFolders.splice(index, 1);
-                updateFolderList();
-                showNotification('Folder removed', 'success');
-            }
-        }
-        
-        function showNotification(message, type) {
-            const notification = document.createElement('div');
-            notification.className = `notification ${type}`;
-            notification.textContent = message;
-            
-            document.body.appendChild(notification);
-            
-            setTimeout(() => {
-                document.body.removeChild(notification);
-            }, 3000);
-        }
-        
-        function startAutoRefresh() {
-            refreshInterval = setInterval(() => {
-                refreshStats();
-            }, 10000); // Refresh every 10 seconds
-        }
-        
-        // Cleanup on page unload
-        window.addEventListener('beforeunload', () => {
-            if (refreshInterval) {
-                clearInterval(refreshInterval);
-            }
-            if (window.watcherAPI.removeAllListeners) {
-                window.watcherAPI.removeAllListeners();
-            }
+      }
+      if (window.watcherAPI.onUpdateDownloaded) {
+        window.watcherAPI.onUpdateDownloaded((info) => {
+          document.getElementById('updateVersion').textContent = info?.version || '';
+          document.getElementById('updateBanner').style.display = 'block';
         });
-    </script>
+      }
+    }
+
+    function applySettingsToForm() {
+      const apiUrlField = document.getElementById('apiUrl');
+      const apiKeyField = document.getElementById('apiKey');
+      if (!apiUrlField.value) apiUrlField.value = currentSettings.apiUrl || '';
+      if (!apiKeyField.value) apiKeyField.value = currentSettings.apiKey || '';
+      document.getElementById('logLevel').value = currentSettings.logLevel || 'info';
+      document.getElementById('autoStart').checked = !!currentSettings.autoStart;
+      document.getElementById('notifications').checked = !!currentSettings.notifications;
+      renderFolderList();
+      renderOverviewFolderList();
+      renderStatus();
+    }
+
+    function renderStatus() {
+      const isRunning = !!currentSettings.isWatching;
+      const pill = document.getElementById('statusPill');
+      const text = document.getElementById('statusText');
+      const value = document.getElementById('statusValue');
+      const startBtn = document.getElementById('startBtn');
+      const stopBtn = document.getElementById('stopBtn');
+      pill.classList.toggle('running', isRunning);
+      pill.classList.toggle('stopped', !isRunning);
+      text.textContent = isRunning ? 'Running' : 'Stopped';
+      value.textContent = isRunning ? 'Running' : 'Stopped';
+      startBtn.disabled = isRunning;
+      stopBtn.disabled = !isRunning;
+    }
+
+    function renderFolderList() {
+      const list = document.getElementById('folderList');
+      const folders = currentSettings.watchFolders || [];
+      list.innerHTML = '';
+      if (folders.length === 0) {
+        list.innerHTML = '<div class="empty-state">No folders configured</div>';
+        return;
+      }
+      folders.forEach((folder, idx) => {
+        const row = document.createElement('div');
+        row.className = 'folder-row';
+        const span = document.createElement('span');
+        span.textContent = folder;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'remove';
+        btn.textContent = 'Remove';
+        btn.addEventListener('click', () => removeFolder(idx));
+        row.appendChild(span);
+        row.appendChild(btn);
+        list.appendChild(row);
+      });
+    }
+
+    function renderOverviewFolderList() {
+      const list = document.getElementById('overviewFolderList');
+      const folders = currentSettings.watchFolders || [];
+      list.innerHTML = '';
+      if (folders.length === 0) {
+        list.innerHTML = '<div class="empty-state">No watched folders configured</div>';
+        return;
+      }
+      folders.forEach(f => {
+        const row = document.createElement('div');
+        row.className = 'folder-row';
+        const span = document.createElement('span');
+        span.textContent = f;
+        row.appendChild(span);
+        list.appendChild(row);
+      });
+    }
+
+    async function startWatching() {
+      try {
+        const r = await window.watcherAPI.startWatching();
+        if (r.success) {
+          currentSettings.isWatching = true;
+          renderStatus();
+          toast('File watcher started', 'success');
+        } else {
+          toast('Failed to start: ' + r.error, 'error');
+        }
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+
+    async function stopWatching() {
+      try {
+        const r = await window.watcherAPI.stopWatching();
+        if (r.success) {
+          currentSettings.isWatching = false;
+          renderStatus();
+          toast('File watcher stopped', 'success');
+        } else {
+          toast('Failed to stop: ' + r.error, 'error');
+        }
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+
+    async function refreshStats() {
+      try {
+        const stats = await window.watcherAPI.getStats();
+        document.getElementById('filesProcessed').textContent = stats.filesProcessed ?? 0;
+        document.getElementById('tradesImported').textContent = stats.tradesImported ?? 0;
+        document.getElementById('openTradesImported').textContent = stats.openTradesImported ?? 0;
+        document.getElementById('errorsCount').textContent = stats.errors ?? 0;
+        document.getElementById('watchedFolders').textContent = (stats.watchedFolders || []).length;
+
+        // Surface secondary issue counters under the errors stat
+        const errorsStat = document.getElementById('errorsStat');
+        const errorsSub = document.getElementById('errorsSub');
+        const truncated = stats.truncatedFiles ?? 0;
+        const brokerRej = stats.brokerTimeRejections ?? 0;
+        if (stats.errors > 0) errorsStat.classList.add('danger');
+        else errorsStat.classList.remove('danger');
+        const subParts = [];
+        if (truncated > 0) subParts.push(`${truncated} truncated`);
+        if (brokerRej > 0) subParts.push(`${brokerRej} broker-time rejections`);
+        errorsSub.textContent = subParts.join(' · ');
+
+        const lastProcessed = document.getElementById('lastProcessed');
+        if (stats.lastProcessed) {
+          const d = new Date(stats.lastProcessed);
+          lastProcessed.textContent = d.toLocaleString();
+        } else {
+          lastProcessed.textContent = 'No activity yet';
+        }
+        currentSettings.isWatching = stats.isRunning;
+        renderStatus();
+      } catch (e) {
+        console.error('refreshStats error', e);
+      }
+    }
+
+    async function refreshLogs() {
+      try {
+        const logs = await window.watcherAPI.getLogs();
+        const container = document.getElementById('logContainer');
+        container.innerHTML = '';
+        if (!logs || logs.length === 0) {
+          container.innerHTML = '<div class="log-line"><span class="log-msg" style="color:var(--text-subtle)">No logs yet.</span></div>';
+          return;
+        }
+        logs.forEach(log => {
+          const line = document.createElement('div');
+          line.className = `log-line ${log.level}`;
+          const t = document.createElement('span');
+          t.className = 'log-time';
+          t.textContent = new Date(log.timestamp).toLocaleTimeString();
+          const lvl = document.createElement('span');
+          lvl.className = 'log-level';
+          lvl.textContent = log.level;
+          const m = document.createElement('span');
+          m.className = 'log-msg';
+          m.textContent = log.message;
+          line.appendChild(t); line.appendChild(lvl); line.appendChild(m);
+          container.appendChild(line);
+        });
+        container.scrollTop = container.scrollHeight;
+      } catch (e) {
+        console.error('refreshLogs error', e);
+      }
+    }
+
+    async function refreshSymbolMap() {
+      const list = document.getElementById('symbolMapList');
+      list.innerHTML = '<div class="empty-state">Loading…</div>';
+      try {
+        const map = (await window.watcherAPI.getSymbolMap()) || {};
+        list.innerHTML = '';
+        const keys = Object.keys(map).sort();
+        if (keys.length === 0) {
+          list.innerHTML = '<div class="empty-state">No symbol mappings configured. Add some in your web app under Settings → Symbol Map.</div>';
+          return;
+        }
+        keys.forEach(canonical => {
+          const variants = map[canonical] || [];
+          const row = document.createElement('div');
+          row.className = 'symbol-row';
+          row.innerHTML = `
+            <span class="canonical">${escapeHtml(canonical)}</span>
+            <span class="arrow">←</span>
+            <div class="variants">
+              ${variants.length === 0
+                ? '<span style="color: var(--text-subtle); font-size: 11px;">no variants</span>'
+                : variants.map(v => `<span class="variant-chip">${escapeHtml(v)}</span>`).join('')}
+            </div>`;
+          list.appendChild(row);
+        });
+      } catch (e) {
+        list.innerHTML = `<div class="empty-state">Failed to load symbol map: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+      document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `${name}Panel`));
+    }
+
+    async function saveSettings(e) {
+      e.preventDefault();
+      const settings = {
+        apiUrl: document.getElementById('apiUrl').value,
+        apiKey: document.getElementById('apiKey').value,
+        watchFolders: currentSettings.watchFolders || [],
+        logLevel: document.getElementById('logLevel').value,
+        autoStart: document.getElementById('autoStart').checked,
+        notifications: document.getElementById('notifications').checked
+      };
+      try {
+        const r = await window.watcherAPI.saveSettings(settings);
+        if (r.success) {
+          currentSettings = { ...currentSettings, ...settings };
+          renderOverviewFolderList();
+          toast('Settings saved', 'success');
+        } else {
+          toast('Failed to save settings', 'error');
+        }
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+
+    async function testApiConnection() {
+      const apiUrl = document.getElementById('apiUrl').value;
+      const apiKey = document.getElementById('apiKey').value;
+      if (!apiUrl) return toast('Enter the web app URL first', 'error');
+      currentSettings.apiUrl = apiUrl;
+      currentSettings.apiKey = apiKey;
+      try {
+        const r = await window.watcherAPI.testApi(apiUrl, apiKey);
+        if (r.success) {
+          toast('Connected', 'success');
+          currentSettings.apiKeyName = r.message || 'Connected';
+          updateApiKeyStatus();
+        } else {
+          toast('Connection failed: ' + r.error, 'error');
+          hideApiKeyStatus();
+        }
+      } catch (e) { toast('Error: ' + e.message, 'error'); hideApiKeyStatus(); }
+    }
+
+    function updateApiKeyStatus() {
+      const status = document.getElementById('apiKeyStatus');
+      const name = document.getElementById('apiKeyName');
+      const id = document.getElementById('watcherId');
+      if (currentSettings.apiKey && currentSettings.apiKey.trim().length > 0) {
+        name.textContent = currentSettings.apiKeyName || 'API key configured';
+        id.textContent = `Watcher ID: ${currentSettings.watcherId || 'pending registration'}`;
+        status.classList.add('show');
+      } else {
+        hideApiKeyStatus();
+      }
+    }
+    function hideApiKeyStatus() {
+      document.getElementById('apiKeyStatus').classList.remove('show');
+    }
+
+    async function browseFolder() {
+      try {
+        const r = await window.watcherAPI.selectFolder();
+        if (r.success && r.path) document.getElementById('newFolder').value = r.path;
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+
+    function addFolder() {
+      const inp = document.getElementById('newFolder');
+      const v = inp.value.trim();
+      if (!v) return toast('Enter a folder path', 'error');
+      currentSettings.watchFolders = currentSettings.watchFolders || [];
+      if (currentSettings.watchFolders.includes(v)) return toast('Folder already added', 'error');
+      currentSettings.watchFolders.push(v);
+      inp.value = '';
+      renderFolderList();
+      renderOverviewFolderList();
+      toast('Folder added — remember to save settings', 'success');
+    }
+
+    function removeFolder(idx) {
+      if (!currentSettings.watchFolders) return;
+      currentSettings.watchFolders.splice(idx, 1);
+      renderFolderList();
+      renderOverviewFolderList();
+      toast('Folder removed — remember to save settings', 'success');
+    }
+
+    async function checkForUpdates() {
+      try {
+        const r = await window.watcherAPI.checkForUpdates();
+        if (r.success) {
+          if (r.updateInfo?.version) {
+            toast(`Update v${r.updateInfo.version} found`, 'success');
+          } else {
+            toast('You are on the latest version', 'success');
+          }
+        } else {
+          toast('Update check failed: ' + r.error, 'error');
+        }
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+
+    function toast(message, type = 'success') {
+      const wrap = document.getElementById('toasts');
+      const t = document.createElement('div');
+      t.className = `toast ${type}`;
+      t.textContent = message;
+      wrap.appendChild(t);
+      setTimeout(() => {
+        t.style.transition = 'opacity 0.2s, transform 0.2s';
+        t.style.opacity = '0';
+        t.style.transform = 'translateY(8px)';
+        setTimeout(() => t.remove(), 200);
+      }, 3500);
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+    }
+
+    function startAutoRefresh() {
+      refreshInterval = setInterval(refreshStats, 10000);
+    }
+
+    window.addEventListener('beforeunload', () => {
+      if (refreshInterval) clearInterval(refreshInterval);
+      if (window.watcherAPI.removeAllListeners) window.watcherAPI.removeAllListeners();
+    });
+  </script>
 </body>
 </html>
