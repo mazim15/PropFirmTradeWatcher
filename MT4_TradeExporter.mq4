@@ -252,7 +252,12 @@ int WriteTradeData(int fileHandle)
         if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
 
         if(OrderOpenTime() < cutoffTime) continue;
-        if(lastExportTime > 0 && OrderCloseTime() <= lastExportTime) continue;
+        // NOTE: do NOT filter by lastExportTime here. The output file is
+        // <_latest.csv> and gets atomically overwritten each cycle, so the
+        // watcher expects it to be a *snapshot* of the last MaxHistoryDays
+        // — not an incremental delta. Filtering produced an empty file when
+        // no trade closed in the last interval, which broke the watcher's
+        // fold-in path (auto-closed trades could never be corrected).
         if(OrderType() > 1 && OrderCloseTime() == 0) continue; // pending cancellations
 
         string tradeType = "";

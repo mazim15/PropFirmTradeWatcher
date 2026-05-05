@@ -347,7 +347,12 @@ bool WritePositionAggregate(int fileHandle, ulong positionId)
     }
 
     if(!haveEntry || !sawExit) return false;
-    if(lastExportTime > 0 && !everAfterLastExport) return false; // already exported in a previous pass
+    // NOTE: do NOT skip based on lastExportTime here. The output file is
+    // <_latest.csv> and gets atomically overwritten each cycle, so the
+    // watcher expects it to be a *snapshot* of the last MaxHistoryDays —
+    // not an incremental delta. Filtering produced an empty file when no
+    // position closed in the last interval, which broke the watcher's
+    // fold-in path (auto-closed trades could never be corrected).
 
     double closePrice = (closeVolume > 0) ? (weightedClose / closeVolume) : 0.0;
 
