@@ -1,7 +1,8 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { TradeData, OpenTradeData, AccountStateData } from './fileWatcher';
 import { Logger } from './logger';
-import { normaliseSymbol, SymbolMap } from './symbolNormaliser';
+import { explainSymbol, SymbolResolution, SymbolMap } from './symbolNormaliser';
+import { EndpointStats, EndpointSnapshot } from './endpointStats';
 
 // Retry transient failures (network errors, 5xx). Don't retry 4xx — those
 // are deterministic (bad request, unauthorized, etc) and won't recover.
@@ -52,16 +53,40 @@ export interface ApiTestResult {
   error?: string;
 }
 
+/**
+ * How long a resolved account number stays trusted.
+ *
+ * findAccountByNumber used to run on every single file event with no cache at
+ * all: ~30,700 identical lookups a day for eleven accounts, about 21 every
+ * minute. Accounts are created by hand in the web app and essentially never
+ * change, so a few minutes of staleness costs nothing and a miss is retried
+ * immediately.
+ */
+const ACCOUNT_CACHE_TTL_MS = 5 * 60 * 1000;
+/** Negative results expire faster, so linking an account takes effect quickly. */
+const ACCOUNT_MISS_TTL_MS = 60 * 1000;
+
+interface CachedAccount {
+  account: TradingAccount | null;
+  at: number;
+}
+
 export class ApiClient {
   private axiosInstance: AxiosInstance;
   private keyName: string = '';
   private symbolMap: SymbolMap | undefined;
+  /** Survives updateConfig() rebuilding the axios instance. */
+  private endpointStats = new EndpointStats();
+  private accountCache = new Map<string, CachedAccount>();
+  /** Raw broker symbol -> how it resolved, for the Symbols screen. */
+  private symbolsSeen = new Map<string, SymbolResolution & { count: number; lastAt: number }>();
 
   constructor(
     private apiUrl: string,
     private apiKey: string,
     private logger: Logger,
-    symbolMap?: SymbolMap
+    symbolMap?: SymbolMap,
+    private appVersion: string = '0.0.0'
   ) {
     this.symbolMap = symbolMap;
     this.axiosInstance = this.createAxiosInstance();
@@ -71,26 +96,85 @@ export class ApiClient {
     return this.keyName;
   }
 
+  public getEndpointStats(): EndpointSnapshot[] {
+    return this.endpointStats.snapshot();
+  }
+
+  /** Forgets every cached account, e.g. after the operator links a new one. */
+  public clearAccountCache(accountNumber?: string): void {
+    if (accountNumber) this.accountCache.delete(accountNumber);
+    else this.accountCache.clear();
+  }
+
+  public accountCacheSize(): number {
+    return this.accountCache.size;
+  }
+
+  public getSymbolsSeen(): (SymbolResolution & { count: number; lastAt: number })[] {
+    // Guessed resolutions first — those are the ones that can silently
+    // mis-resolve and need an explicit rule.
+    return [...this.symbolsSeen.values()].sort(
+      (a, b) => Number(b.guessed) - Number(a.guessed) || b.count - a.count
+    );
+  }
+
+  /** Records how a raw broker symbol resolved, then returns the canonical. */
+  private resolveSymbol(raw: string): string {
+    const res = explainSymbol(raw, this.symbolMap);
+    if (res.raw) {
+      const prev = this.symbolsSeen.get(res.raw);
+      this.symbolsSeen.set(res.raw, {
+        ...res,
+        count: (prev?.count ?? 0) + 1,
+        lastAt: Date.now()
+      });
+    }
+    return res.canonical;
+  }
+
   public updateConfig(apiUrl: string, apiKey: string): void {
     this.apiUrl = apiUrl;
     this.apiKey = apiKey;
     this.axiosInstance = this.createAxiosInstance();
+    // A different server or key resolves account numbers differently.
+    this.accountCache.clear();
   }
 
   public setSymbolMap(map: SymbolMap | undefined): void {
     this.symbolMap = map;
+    // A new map resolves the same raw symbols differently, so past
+    // observations no longer describe what would happen now.
+    this.symbolsSeen.clear();
   }
 
   private createAxiosInstance(): AxiosInstance {
-    return axios.create({
+    const instance = axios.create({
       baseURL: this.apiUrl.endsWith('/') ? this.apiUrl.slice(0, -1) : this.apiUrl,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'PropFirm-Trade-Watcher/1.0',
+        'User-Agent': `PropFirm-Trade-Watcher/${this.appVersion}`,
         ...(this.apiKey ? { 'Authorization': `Bearer ${this.apiKey}` } : {})
       }
     });
+
+    // Recorded by interceptor rather than at each call site, so an endpoint
+    // added later cannot be silently left out of the Health screen — which is
+    // exactly how /api/accounts/state went unnoticed for months.
+    instance.interceptors.response.use(
+      response => {
+        this.endpointStats.record(response.config.url ?? '', true);
+        return response;
+      },
+      (error: AxiosError) => {
+        const url = error.config?.url ?? '';
+        const status = error.response?.status;
+        this.endpointStats.record(url, false, status ? `HTTP ${status}` : error.message);
+        return Promise.reject(error);
+      }
+    );
+
+    return instance;
   }
 
   public async testConnection(): Promise<ApiTestResult> {
@@ -148,6 +232,16 @@ export class ApiClient {
   }
 
   public async findAccountByNumber(accountNumber: string): Promise<TradingAccount | null> {
+    const cached = this.accountCache.get(accountNumber);
+    if (cached) {
+      const ttl = cached.account ? ACCOUNT_CACHE_TTL_MS : ACCOUNT_MISS_TTL_MS;
+      if (Date.now() - cached.at < ttl) {
+        this.logger.debug(`Account ${accountNumber} served from cache`);
+        return cached.account;
+      }
+      this.accountCache.delete(accountNumber);
+    }
+
     try {
       this.logger.debug(`Looking for account: ${accountNumber}`);
 
@@ -159,18 +253,25 @@ export class ApiClient {
 
       if (response.data && response.data.account) {
         this.logger.info(`Found matching account: ${response.data.account.name} (${accountNumber})`);
+        this.accountCache.set(accountNumber, { account: response.data.account, at: Date.now() });
         return response.data.account;
       }
 
       this.logger.warn(`No account found for number: ${accountNumber}`);
+      this.accountCache.set(accountNumber, { account: null, at: Date.now() });
       return null;
     } catch (error) {
       this.logger.error(`Error finding account ${accountNumber}: ${error instanceof Error ? error.message : String(error)}`);
 
       if (axios.isAxiosError(error) && error.response?.status === 404) {
-        return null; // Account not found
+        // A miss is cached briefly so a terminal writing every 30s does not
+        // re-ask 2,880 times a day for an account that does not exist.
+        this.accountCache.set(accountNumber, { account: null, at: Date.now() });
+        return null;
       }
 
+      // A network or 5xx failure is NOT cached: the account may well exist and
+      // caching the failure would keep the account dark until a restart.
       throw error;
     }
   }
@@ -226,7 +327,7 @@ export class ApiClient {
         notes: `Watcher Import | Ticket: ${trade.ticket}${trade.stopLoss ? ` | SL: ${trade.stopLoss}` : ''}${trade.takeProfit ? ` | TP: ${trade.takeProfit}` : ''}${trade.comment ? ` | ${trade.comment}` : ''}`,
         tags: ['watcher-import'],
         createdDate: new Date().toISOString(),
-        symbol: normaliseSymbol(trade.symbol, this.symbolMap), // canonicalised for resolution
+        symbol: this.resolveSymbol(trade.symbol), // canonicalised for resolution
         symbolRaw: trade.symbol, // preserve original broker-side name
         magic: trade.magic ?? 0
       }));
@@ -395,7 +496,7 @@ export class ApiClient {
         tags: ['watcher-import', 'open-trade'],
         createdDate: new Date().toISOString(),
         lastUpdated: new Date().toISOString(),
-        symbol: normaliseSymbol(trade.symbol, this.symbolMap),
+        symbol: this.resolveSymbol(trade.symbol),
         symbolRaw: trade.symbol,
         magic: trade.magic ?? 0
       }));

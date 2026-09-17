@@ -24,6 +24,19 @@ export interface WatcherAPI {
   // Symbol map
   getSymbolMap: () => Promise<any>;
   saveSymbolMap: (map: any) => Promise<any>;
+  getSymbolsSeen: () => Promise<any>;
+
+  // Live / Health / Attention screens
+  getAccountHealth: () => Promise<any>;
+  getEndpointStats: () => Promise<any>;
+  getBuildInfo: () => Promise<any>;
+  getAttention: () => Promise<any>;
+  resolveAttention: (id: string) => Promise<any>;
+  muteAttention: (id: string, ms: number) => Promise<any>;
+  relinkAccount: (accountNumber: string) => Promise<any>;
+  openFolder: (folder: string) => Promise<any>;
+  getQueue: () => Promise<any>;
+  copyDiagnostics: () => Promise<any>;
 
   // Updates
   checkForUpdates: () => Promise<any>;
@@ -59,6 +72,19 @@ contextBridge.exposeInMainWorld('watcherAPI', {
   // Symbol map
   getSymbolMap: () => ipcRenderer.invoke('get-symbol-map'),
   saveSymbolMap: (map: any) => ipcRenderer.invoke('save-symbol-map', map),
+  getSymbolsSeen: () => ipcRenderer.invoke('get-symbols-seen'),
+
+  // Live / Health / Attention screens
+  getAccountHealth: () => ipcRenderer.invoke('get-account-health'),
+  getEndpointStats: () => ipcRenderer.invoke('get-endpoint-stats'),
+  getBuildInfo: () => ipcRenderer.invoke('get-build-info'),
+  getAttention: () => ipcRenderer.invoke('get-attention'),
+  resolveAttention: (id: string) => ipcRenderer.invoke('resolve-attention', id),
+  muteAttention: (id: string, ms: number) => ipcRenderer.invoke('mute-attention', id, ms),
+  relinkAccount: (accountNumber: string) => ipcRenderer.invoke('relink-account', accountNumber),
+  openFolder: (folder: string) => ipcRenderer.invoke('open-folder', folder),
+  getQueue: () => ipcRenderer.invoke('get-queue'),
+  copyDiagnostics: () => ipcRenderer.invoke('copy-diagnostics'),
 
   // Updates
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),

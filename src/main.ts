@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, Notification, clipboard } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -32,6 +32,13 @@ class TradeWatcherApp {
   private watcherId: string = '';
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private registrationRetryTimeout: NodeJS.Timeout | null = null;
+  /** Drives the staleness alarm and the tray colour. */
+  private healthInterval: NodeJS.Timeout | null = null;
+  /** Attention ids already notified, so one outage rings once, not every tick. */
+  private notified = new Set<string>();
+  /** Newest release the updater has seen, for the Health screen's build rows. */
+  private latestVersion: string | null = null;
+  private lastUpdateCheck: number | null = null;
 
   constructor() {
     this.store = new Store<Record<string, unknown>>({
@@ -43,6 +50,7 @@ class TradeWatcherApp {
         notifications: true,
         logLevel: 'info',
         watcherId: '',
+        machineName: '',
         symbolMap: {} as SymbolMap
       }
     });
@@ -57,7 +65,8 @@ class TradeWatcherApp {
       this.store.get('apiUrl') as string,
       this.store.get('apiKey') as string,
       this.logger,
-      this.store.get('symbolMap') as SymbolMap
+      this.store.get('symbolMap') as SymbolMap,
+      app.getVersion()
     );
     this.fileWatcher = new FileWatcher(this.apiClient, this.logger, this.store);
   }
@@ -94,6 +103,7 @@ class TradeWatcherApp {
     
     this.createTray();
     this.createWindow();
+    this.startHealthMonitor();
     this.setupIpcHandlers();
     
     // Log startup settings for debugging
@@ -158,7 +168,7 @@ class TradeWatcherApp {
         this.logger.warn(`API connection test failed: ${testResult.error}. Watcher registration skipped.`);
       } else {
         const systemInfo = {
-          hostname: os.hostname(),
+          hostname: this.machineLabel(),
           platform: os.platform(),
           arch: os.arch(),
           version: os.release(),
@@ -166,7 +176,11 @@ class TradeWatcherApp {
           uptime: os.uptime()
         };
 
-        const registered = await this.apiClient.registerWatcher(this.watcherId, '1.0.0', systemInfo);
+        // app.getVersion() reads package.json at build time. This used to be
+        // the literal '1.0.0', so every watcher on every PC reported the same
+        // version regardless of what was installed — which made the fleet's
+        // real versions unknowable and sent one investigation down a dead end.
+        const registered = await this.apiClient.registerWatcher(this.watcherId, app.getVersion(), systemInfo);
         if (registered) {
           this.logger.info(`Watcher registered successfully with persistent ID: ${this.watcherId} on ${systemInfo.hostname}`);
           // Pull latest user symbol map so suffix/alias rules are fresh.
@@ -335,6 +349,7 @@ class TradeWatcherApp {
         click: () => {
           (app as any).isQuitting = true;
           this.stopHeartbeat();
+          this.stopHealthMonitor();
           if (this.registrationRetryTimeout) {
             clearTimeout(this.registrationRetryTimeout);
             this.registrationRetryTimeout = null;
@@ -353,6 +368,139 @@ class TradeWatcherApp {
     });
   }
 
+  /** Operator-chosen label for this PC, falling back to the hostname. */
+  private machineLabel(): string {
+    const name = (this.store.get('machineName') as string | undefined)?.trim();
+    return name && name.length > 0 ? name : os.hostname();
+  }
+
+  /**
+   * Polls account health once a minute: raises a desktop notification the
+   * first time an account goes stale, and keeps the tray tooltip current so
+   * trouble is visible without opening the window.
+   *
+   * Notifications are keyed by attention id and cleared when the condition
+   * resolves, so a terminal that is off overnight rings once rather than
+   * hourly, and rings again if it fails a second time tomorrow.
+   */
+  private startHealthMonitor(): void {
+    if (this.healthInterval) return;
+    const tick = () => {
+      try {
+        const { open } = this.fileWatcher.getAttention();
+        const openIds = new Set(open.map(i => i.id));
+        for (const id of [...this.notified]) {
+          if (!openIds.has(id)) this.notified.delete(id);
+        }
+
+        // A stopped watcher makes every feed go stale by definition. Ringing
+        // about that would be the app complaining about something the
+        // operator just did on purpose.
+        if (this.store.get('notifications') && this.fileWatcher.isRunning()) {
+          for (const item of open) {
+            if (this.notified.has(item.id)) continue;
+            this.notified.add(item.id);
+            if (Notification.isSupported()) {
+              new Notification({ title: item.title, body: item.detail }).show();
+            }
+          }
+        }
+
+        this.updateTrayHealth();
+      } catch (error) {
+        this.logger.debug(`Health monitor tick failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    this.healthInterval = setInterval(tick, 60 * 1000);
+    tick();
+  }
+
+  private stopHealthMonitor(): void {
+    if (this.healthInterval) {
+      clearInterval(this.healthInterval);
+      this.healthInterval = null;
+    }
+  }
+
+  /**
+   * The window spends its life minimised, so the tray carries the summary.
+   * Only one icon ships, so the state is written into the tooltip (and the
+   * title, on platforms that show one) rather than faked with a tinted image.
+   */
+  private updateTrayHealth(): void {
+    if (!this.tray) return;
+    try {
+      const health = this.fileWatcher.getAccountHealth();
+      const { feeding, total } = { feeding: health.filter(a => a.status === 'live').length, total: health.length };
+      const bad = health.filter(a => a.status === 'down' || a.status === 'unmatched').length;
+      const stale = health.filter(a => a.status === 'stale').length;
+
+      const mark = bad > 0 ? '\u25cf' : stale > 0 ? '\u25d0' : '\u25cb';
+      const state = !this.fileWatcher.isRunning()
+        ? 'Stopped'
+        : bad > 0
+          ? `${bad} account${bad === 1 ? '' : 's'} down`
+          : stale > 0
+            ? `${stale} account${stale === 1 ? '' : 's'} stale`
+            : 'All feeds current';
+
+      this.tray.setToolTip(`PropFirm Trade Watcher — ${this.machineLabel()}\n${state} (${feeding}/${total} feeding)`);
+      if (process.platform === 'darwin') this.tray.setTitle(total > 0 ? `${mark}` : '');
+    } catch {
+      // A tray label is never worth throwing over.
+    }
+  }
+
+  /**
+   * Everything a support conversation needs, in one paste: versions, settings
+   * with the key redacted, feed health, endpoint health and recent logs.
+   */
+  private buildDiagnosticBundle(): string {
+    const redact = (k: string) => (k && k.length > 8 ? `${k.slice(0, 4)}…${k.slice(-4)}` : k ? '(set)' : '(none)');
+    const health = this.fileWatcher.getAccountHealth();
+    const endpoints = this.apiClient.getEndpointStats();
+    const stats = this.fileWatcher.getStats();
+
+    const lines: string[] = [];
+    lines.push('=== PropFirm Trade Watcher diagnostics ===');
+    lines.push(`generated   ${new Date().toISOString()}`);
+    lines.push(`version     ${app.getVersion()}${this.latestVersion ? ` (latest ${this.latestVersion})` : ''}`);
+    lines.push(`electron    ${process.versions.electron}  node ${process.versions.node}`);
+    lines.push(`machine     ${this.machineLabel()}  ${os.platform()} ${os.release()} ${os.arch()}`);
+    lines.push(`watcherId   ${this.watcherId}`);
+    lines.push(`apiUrl      ${this.store.get('apiUrl')}`);
+    lines.push(`apiKey      ${redact(this.store.get('apiKey') as string)}`);
+    lines.push(`folders     ${(this.store.get('watchFolders') as string[]).join(', ')}`);
+    lines.push(`running     ${this.fileWatcher.isRunning()}`);
+    lines.push('');
+    lines.push(`--- stats ---`);
+    lines.push(
+      `files ${stats.filesProcessed}  closed ${stats.tradesImported}  open ${stats.openTradesImported}  ` +
+      `errors ${stats.errors}  truncated ${stats.truncatedFiles}  brokerTimeRejections ${stats.brokerTimeRejections}`
+    );
+    lines.push('');
+    lines.push('--- accounts ---');
+    for (const a of health) {
+      const feeds = a.feeds.map(f => `${f.kind}=${formatAgeShort(f.age)}`).join(' ');
+      lines.push(`${a.accountNumber.padEnd(12)} ${a.status.padEnd(9)} ${feeds}  ${a.accountName ?? '(unlinked)'}  ${a.reason}`);
+    }
+    lines.push('');
+    lines.push('--- endpoints (24h) ---');
+    for (const e of endpoints) {
+      lines.push(
+        `${e.path.padEnd(34)} calls=${String(e.calls24h).padStart(6)} fails=${String(e.fails24h).padStart(4)} ` +
+        `lastOk=${formatAgeShort(e.lastOkAt === null ? null : Date.now() - e.lastOkAt)}` +
+        `${e.neverCalled ? '  NEVER CALLED' : ''}${e.lastError ? `  lastError=${e.lastError}` : ''}`
+      );
+    }
+    lines.push('');
+    lines.push('--- recent logs ---');
+    for (const l of this.logger.getRecentLogs(200)) {
+      lines.push(typeof l === 'string' ? l : JSON.stringify(l));
+    }
+    return lines.join('\n');
+  }
+
   private setupIpcHandlers(): void {
     // Get current settings
     ipcMain.handle('get-settings', () => {
@@ -363,8 +511,11 @@ class TradeWatcherApp {
         autoStart: this.store.get('autoStart'),
         notifications: this.store.get('notifications'),
         logLevel: this.store.get('logLevel'),
+        machineName: this.store.get('machineName'),
         isWatching: this.fileWatcher.isRunning(),
-        watcherId: this.watcherId // Include persistent watcher ID
+        watcherId: this.watcherId, // Include persistent watcher ID
+        appVersion: app.getVersion(),
+        defaultWatchFolder: getDefaultWatchFolder()
       };
     });
 
@@ -381,6 +532,7 @@ class TradeWatcherApp {
       this.store.set('autoStart', settings.autoStart);
       this.store.set('notifications', settings.notifications);
       this.store.set('logLevel', settings.logLevel);
+      this.store.set('machineName', settings.machineName ?? '');
 
       // Update API client
       this.apiClient.updateConfig(settings.apiUrl, settings.apiKey);
@@ -478,6 +630,10 @@ class TradeWatcherApp {
       return this.store.get('symbolMap') as SymbolMap;
     });
 
+    ipcMain.handle('get-symbols-seen', () => {
+      return this.apiClient.getSymbolsSeen();
+    });
+
     ipcMain.handle('save-symbol-map', (_, map: SymbolMap) => {
       this.store.set('symbolMap', map);
       this.apiClient.setSymbolMap(map);
@@ -489,7 +645,84 @@ class TradeWatcherApp {
     ipcMain.handle('check-for-updates', async () => {
       try {
         const result = await autoUpdater.checkForUpdates();
+        this.lastUpdateCheck = Date.now();
+        if (result?.updateInfo?.version) this.latestVersion = result.updateInfo.version;
         return { success: true, updateInfo: result?.updateInfo };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+
+    // --- Live screen -------------------------------------------------------
+
+    ipcMain.handle('get-account-health', () => {
+      return this.fileWatcher.getAccountHealth();
+    });
+
+    // --- Health screen -----------------------------------------------------
+
+    ipcMain.handle('get-endpoint-stats', () => {
+      return this.apiClient.getEndpointStats();
+    });
+
+    ipcMain.handle('get-build-info', () => {
+      return {
+        running: app.getVersion(),
+        latest: this.latestVersion,
+        lastCheckedAt: this.lastUpdateCheck,
+        electron: process.versions.electron,
+        node: process.versions.node,
+        machine: this.machineLabel(),
+        watcherId: this.watcherId,
+        cachedAccounts: this.apiClient.accountCacheSize()
+      };
+    });
+
+    // --- Attention screen --------------------------------------------------
+
+    ipcMain.handle('get-attention', () => {
+      return this.fileWatcher.getAttention();
+    });
+
+    ipcMain.handle('resolve-attention', (_, id: string) => {
+      return { success: this.fileWatcher.resolveAttention(id) };
+    });
+
+    ipcMain.handle('mute-attention', (_, id: string, ms: number) => {
+      this.fileWatcher.muteAttention(id, ms);
+      return { success: true };
+    });
+
+    /**
+     * The operator created or linked the account in the web app; drop the
+     * cached miss and replay everything held while it was unlinked.
+     */
+    ipcMain.handle('relink-account', async (_, accountNumber: string) => {
+      try {
+        const replayed = this.fileWatcher.replayHeldFiles(accountNumber);
+        return { success: true, replayed };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+
+    ipcMain.handle('open-folder', async (_, folder: string) => {
+      await shell.openPath(folder);
+      return { success: true };
+    });
+
+    // --- Queue -------------------------------------------------------------
+
+    ipcMain.handle('get-queue', () => {
+      return this.fileWatcher.getQueue();
+    });
+
+    // --- Diagnostics -------------------------------------------------------
+
+    ipcMain.handle('copy-diagnostics', () => {
+      try {
+        clipboard.writeText(this.buildDiagnosticBundle());
+        return { success: true };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
@@ -509,6 +742,7 @@ class TradeWatcherApp {
 
     autoUpdater.on('update-available', (info: { version?: string }) => {
       this.logger.info(`Update available: ${info?.version ?? 'unknown'}`);
+      if (info?.version) this.latestVersion = info.version;
       this.mainWindow?.webContents.send('update-available', info);
     });
 
@@ -522,6 +756,13 @@ class TradeWatcherApp {
     });
 
     // Don't fail startup if check throws (e.g. offline, unsigned dev build).
+    autoUpdater.on('update-not-available', (info: { version?: string }) => {
+      // No newer build exists, so the running version IS the latest — the
+      // Health screen needs that stated, not left blank.
+      this.latestVersion = info?.version ?? app.getVersion();
+      this.lastUpdateCheck = Date.now();
+    });
+
     autoUpdater.checkForUpdates().catch((err: unknown) => {
       this.logger.debug(`Auto-update check skipped: ${err instanceof Error ? err.message : String(err)}`);
     });
@@ -566,4 +807,16 @@ if (!gotTheLock) {
       windows[0].focus();
     }
   });
+}
+
+/** Compact age for the diagnostic bundle's fixed-width columns. */
+function formatAgeShort(ms: number | null): string {
+  if (ms === null) return 'never';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h${String(m % 60).padStart(2, '0')}`;
+  return `${Math.floor(h / 24)}d`;
 }

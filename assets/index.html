@@ -5,27 +5,34 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PropFirm Trade Watcher</title>
 <style>
+  /* Blue-biased neutrals rather than pure zinc: this is an instrument panel
+     for a trading desk, and the accent is a signal cyan reserved for brand
+     and active state. Semantic green/amber/red are separate from it, so
+     "healthy" never competes with "selected". */
   :root {
-    --bg: #09090b;
-    --surface: #131316;
-    --surface-2: #1c1c21;
-    --surface-3: #25252b;
-    --border: #27272a;
-    --border-strong: #3f3f46;
-    --text: #fafafa;
-    --text-muted: #a1a1aa;
-    --text-subtle: #71717a;
-    --accent: #3b82f6;
-    --accent-hover: #2563eb;
-    --accent-soft: rgba(59, 130, 246, 0.12);
-    --success: #10b981;
-    --success-soft: rgba(16, 185, 129, 0.12);
-    --warning: #f59e0b;
-    --warning-soft: rgba(245, 158, 11, 0.12);
-    --danger: #ef4444;
-    --danger-soft: rgba(239, 68, 68, 0.12);
+    --bg: #0B0E14;
+    --surface: #141A25;
+    --surface-2: #1A2230;
+    --surface-3: #232C3D;
+    --border: #242E40;
+    --border-strong: #33405A;
+    --text: #E8ECF3;
+    --text-muted: #AEBBD0;
+    --text-subtle: #7D8CA4;
+    --accent: #4CC9E8;
+    --accent-hover: #6FD6EF;
+    --accent-soft: rgba(76, 201, 232, 0.13);
+    --success: #3ECF8E;
+    --success-soft: rgba(62, 207, 142, 0.13);
+    --warning: #E0A13B;
+    --warning-soft: rgba(224, 161, 59, 0.14);
+    --danger: #F0616D;
+    --danger-soft: rgba(240, 97, 109, 0.13);
+    --violet: #A78BFA;
+    --violet-soft: rgba(167, 139, 250, 0.15);
     --radius: 8px;
     --radius-lg: 10px;
+    --mono: "Cascadia Mono", "Consolas", ui-monospace, "SF Mono", Menlo, monospace;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -34,7 +41,7 @@
     height: 100%;
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Inter, Roboto, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Roboto, sans-serif;
     font-size: 13px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
@@ -43,27 +50,28 @@
 
   body { display: flex; flex-direction: column; min-height: 100vh; }
 
-  /* Header */
+  /* ── Top bar ── */
   .topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 20px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 11px 18px;
     border-bottom: 1px solid var(--border);
     background: var(--bg);
-    position: sticky; top: 0; z-index: 10;
   }
   .topbar .brand {
-    display: flex; align-items: center; gap: 10px;
+    display: flex; align-items: center; gap: 9px;
     font-weight: 600; font-size: 13px; letter-spacing: -0.01em;
   }
   .topbar .brand-dot {
-    width: 8px; height: 8px; border-radius: 2px;
-    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    width: 12px; height: 12px; border-radius: 3px;
+    background: linear-gradient(140deg, var(--accent), #2A7FA8);
+  }
+  .topbar .machine {
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-subtle);
+    border-left: 1px solid var(--border); padding-left: 10px; margin-left: 2px;
   }
   .status-pill {
     display: inline-flex; align-items: center; gap: 8px;
-    padding: 5px 10px;
+    padding: 5px 11px;
     border: 1px solid var(--border);
     border-radius: 999px;
     background: var(--surface);
@@ -73,7 +81,6 @@
   .status-dot {
     width: 7px; height: 7px; border-radius: 50%;
     background: var(--text-subtle);
-    box-shadow: 0 0 0 0 transparent;
     transition: background 0.2s, box-shadow 0.2s;
   }
   .status-pill.running .status-dot {
@@ -82,113 +89,110 @@
     animation: pulse 2s ease-in-out infinite;
   }
   .status-pill.running { color: var(--text); }
-  .status-pill.stopped .status-dot { background: var(--text-subtle); }
-
   @keyframes pulse {
     0%, 100% { box-shadow: 0 0 0 3px var(--success-soft); }
     50% { box-shadow: 0 0 0 6px transparent; }
   }
+  @media (prefers-reduced-motion: reduce) {
+    .status-pill.running .status-dot { animation: none; }
+  }
 
-  /* Update banner */
+  /* ── Update banner ── */
   #updateBanner {
     display: none;
-    padding: 10px 20px;
+    padding: 9px 18px;
     background: var(--accent-soft);
     border-bottom: 1px solid var(--accent);
-    color: var(--text);
     font-size: 12px;
   }
   #updateBanner strong { color: var(--accent); }
 
-  /* Tabs */
+  /* ── Global status strip ── */
+  .strip {
+    display: flex; align-items: center; flex-wrap: wrap;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 9px 18px;
+  }
+  .strip .cell {
+    display: flex; flex-direction: column; gap: 1px;
+    padding-right: 18px; margin-right: 18px;
+    border-right: 1px solid var(--border);
+  }
+  .strip .cell:last-of-type { border-right: none; }
+  .strip .k {
+    font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--text-subtle);
+  }
+  .strip .v {
+    font-family: var(--mono); font-size: 14px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .strip .v.ok { color: var(--success); }
+  .strip .v.bad { color: var(--danger); }
+  .strip .v.wrn { color: var(--warning); }
+  .strip .grow { margin-left: auto; display: flex; gap: 7px; align-items: center; }
+
+  /* ── Tabs ── */
   .tabs {
-    display: flex;
-    padding: 0 20px;
+    display: flex; gap: 2px;
+    padding: 0 14px;
     border-bottom: 1px solid var(--border);
     background: var(--bg);
-    gap: 4px;
   }
   .tab {
-    padding: 12px 14px;
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 13px;
-    font-weight: 500;
+    padding: 10px 13px;
+    background: transparent; border: none;
+    color: var(--text-subtle);
+    font-size: 12.5px; font-weight: 500;
     cursor: pointer;
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
     transition: color 0.15s;
-    display: inline-flex; align-items: center; gap: 7px;
+    font-family: inherit;
   }
   .tab:hover { color: var(--text); }
-  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
-  .tab svg { width: 14px; height: 14px; }
-
-  /* Content area */
-  main {
-    flex: 1;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    overflow-y: auto;
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .tab .pip {
+    display: none; margin-left: 6px;
+    background: var(--danger); color: #0B0E14;
+    font-family: var(--mono); font-size: 9.5px; font-weight: 700;
+    border-radius: 999px; padding: 0 5px; vertical-align: 1px;
   }
+  .tab .pip.show { display: inline-block; }
 
-  .panel { display: none; flex-direction: column; gap: 16px; }
+  main { flex: 1; padding: 14px 18px 18px; overflow-y: auto; }
+  .panel { display: none; flex-direction: column; gap: 13px; }
   .panel.active { display: flex; }
 
-  /* Cards */
+  /* ── Cards ── */
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 16px;
+    padding: 15px 16px;
   }
   .card h3 {
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--text-subtle);
-    margin-bottom: 12px;
-  }
-  .card.compact { padding: 14px; }
-
-  /* Status card with controls */
-  .status-card {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 16px;
-  }
-  .status-card .left { display: flex; flex-direction: column; gap: 4px; }
-  .status-card .label { font-size: 11px; color: var(--text-subtle); text-transform: uppercase; letter-spacing: 0.05em; }
-  .status-card .value { font-size: 18px; font-weight: 600; }
-  .status-card .actions { display: flex; gap: 8px; }
-
-  /* Stats grid */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-  .stat {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 14px;
-  }
-  .stat .stat-label {
-    font-size: 11px; color: var(--text-subtle);
-    text-transform: uppercase; letter-spacing: 0.05em;
-    margin-bottom: 6px;
-  }
-  .stat .stat-value {
-    font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
-  }
-  .stat.warning .stat-value { color: var(--warning); }
-  .stat.danger .stat-value { color: var(--danger); }
-  .stat .stat-sub {
-    font-size: 11px; color: var(--text-subtle); margin-top: 4px;
+    margin-bottom: 11px;
   }
 
-  /* Buttons */
+  .hd {
+    display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap;
+    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--text-subtle); font-weight: 600;
+  }
+  .hd s {
+    text-decoration: none; font-weight: 400; letter-spacing: 0;
+    text-transform: none; font-size: 11.5px;
+    font-family: var(--mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* ── Buttons ── */
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     padding: 7px 12px;
@@ -196,219 +200,279 @@
     color: var(--text);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 12px; font-weight: 500;
+    font-family: inherit;
     cursor: pointer;
-    transition: background 0.12s, border-color 0.12s, color 0.12s;
-    font-family: inherit;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
   }
-  .btn:hover:not(:disabled) { background: var(--surface-3); border-color: #52525b; }
-  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn:hover:not(:disabled) { background: var(--surface-3); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn.primary { background: var(--accent-soft); border-color: rgba(76,201,232,0.45); color: var(--accent); }
+  .btn.success { background: var(--success-soft); border-color: rgba(62,207,142,0.4); color: var(--success); }
+  .btn.danger  { background: var(--danger-soft);  border-color: rgba(240,97,109,0.4); color: var(--danger); }
+  .btn.ghost   { background: transparent; border-color: var(--border); color: var(--text-muted); }
+  .btn.sm { padding: 3px 9px; font-size: 11px; border-radius: 6px; }
   .btn svg { width: 13px; height: 13px; }
-  .btn.primary {
-    background: var(--accent); border-color: var(--accent); color: white;
-  }
-  .btn.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
-  .btn.success {
-    background: var(--success); border-color: var(--success); color: white;
-  }
-  .btn.success:hover:not(:disabled) { filter: brightness(1.1); }
-  .btn.danger {
-    background: var(--danger); border-color: var(--danger); color: white;
-  }
-  .btn.danger:hover:not(:disabled) { filter: brightness(1.1); }
-  .btn.ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
-  .btn.ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
 
-  /* Inputs */
-  .field { display: flex; flex-direction: column; gap: 6px; }
-  .field label {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text-muted);
-  }
-  .field .hint { font-size: 11px; color: var(--text-subtle); }
-  input[type="text"], input[type="url"], input[type="password"], select {
-    width: 100%;
-    padding: 8px 10px;
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    font-size: 13px;
-    font-family: inherit;
-    transition: border-color 0.12s, box-shadow 0.12s;
-  }
-  input:focus, select:focus {
-    outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-  }
-  input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
-
-  .field-row { display: flex; gap: 8px; align-items: stretch; }
-  .field-row > input { flex: 1; }
-
-  /* Folder list */
-  .folder-list { display: flex; flex-direction: column; gap: 6px; }
-  .folder-row {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 8px 10px;
-    background: var(--bg);
+  /* ── Account groups (Live) ── */
+  .grp {
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
-    font-size: 12px;
-    color: var(--text-muted);
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .grp .ghead {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.018);
+    border-bottom: 1px solid var(--border);
+  }
+  .grp .ghead .gname { font-weight: 600; font-size: 12.5px; }
+  .grp .ghead .gpath {
+    font-family: var(--mono); font-size: 10.5px; color: var(--text-subtle);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
+  }
+
+  .acct {
+    display: grid;
+    grid-template-columns: 4px minmax(150px, 190px) 74px minmax(0, 1fr) repeat(3, 84px) 66px;
+    align-items: center;
+    gap: 10px;
+    padding-right: 12px;
+    min-height: 46px;
+    border-top: 1px solid var(--border);
+  }
+  .acct:first-of-type { border-top: none; }
+  .acct .lamp { align-self: stretch; background: var(--text-subtle); }
+  .acct.live .lamp      { background: var(--success); }
+  .acct.stale .lamp     { background: var(--warning); }
+  .acct.down .lamp,
+  .acct.unmatched .lamp { background: var(--danger); }
+  .acct.stale     { background: rgba(224,161,59,0.045); }
+  .acct.down,
+  .acct.unmatched { background: rgba(240,97,109,0.05); }
+
+  .acct .who { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding-left: 10px; }
+  .acct .who .n {
+    font-weight: 600; font-size: 12.5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .acct .who .n.unlinked { color: var(--text-subtle); font-style: italic; font-weight: 500; }
+  .acct .who .num { font-family: var(--mono); font-size: 10.5px; color: var(--text-subtle); }
+
+  .tag {
+    justify-self: start;
+    font-family: var(--mono); font-size: 9.5px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    border-radius: 4px; padding: 2px 6px;
+    background: var(--surface-3); color: var(--text-subtle);
+  }
+  .tag.prop   { background: var(--accent-soft); color: var(--accent); }
+  .tag.broker { background: var(--violet-soft); color: var(--violet); }
+
+  .acct .state { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .acct .state .word {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; flex-shrink: 0;
+  }
+  .acct.live .word      { color: var(--success); }
+  .acct.stale .word     { color: var(--warning); }
+  .acct.down .word,
+  .acct.unmatched .word { color: var(--danger); }
+  .acct.waiting .word   { color: var(--text-subtle); }
+  .acct .state .why {
+    font-size: 11.5px; color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .feed { display: flex; flex-direction: column; gap: 2px; text-align: right; }
+  .feed .fk {
+    font-size: 8.5px; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--text-subtle);
+  }
+  .feed .fv {
+    font-family: var(--mono); font-size: 11.5px;
+    font-variant-numeric: tabular-nums; color: var(--text-muted);
+  }
+  .feed .fv.ok   { color: var(--success); }
+  .feed .fv.warn { color: var(--warning); }
+  .feed .fv.bad  { color: var(--danger); }
+  .feed .fv.none { color: var(--text-subtle); opacity: 0.55; }
+  .acct .go { justify-self: end; }
+
+  /* ── Attention cards ── */
+  .att {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--warning);
+    border-radius: 7px;
+    background: var(--surface);
+    padding: 11px 13px;
+    display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;
+  }
+  .att.severe { border-left-color: var(--danger); }
+  .att.done { border-left-color: var(--border-strong); opacity: 0.66; }
+  .att .txt { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+  .att .t { font-size: 12.5px; font-weight: 600; }
+  .att .d { font-size: 11.5px; color: var(--text-muted); word-break: break-word; }
+  .att .acts { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
+
+  /* ── Tables (Health, Symbols) ── */
+  .tbl-wrap { overflow-x: auto; }
+  table.tbl { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 620px; }
+  table.tbl th {
+    text-align: left;
+    font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--text-subtle); font-weight: 600;
+    padding: 0 10px 7px 0; border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  table.tbl td {
+    padding: 8px 10px 8px 0; border-bottom: 1px solid var(--border);
+    font-family: var(--mono); font-variant-numeric: tabular-nums;
+    color: var(--text-muted); white-space: nowrap;
+  }
+  table.tbl td.path { color: var(--text); }
+  table.tbl tr.dead td { background: rgba(240,97,109,0.06); }
+  table.tbl td:last-child, table.tbl th:last-child { text-align: right; padding-right: 0; }
+  .ok { color: var(--success); }
+  .bad { color: var(--danger); }
+  .warn { color: var(--warning); }
+
+  .spark { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 14px; }
+  .spark i { width: 3px; background: var(--border-strong); border-radius: 1px; min-height: 1px; }
+  .spark.hot i { background: var(--warning); }
+
+  /* ── Forms ── */
+  .section-stack { display: flex; flex-direction: column; gap: 14px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+  .field input[type="text"], .field input[type="url"], .field input[type="password"], .field select {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 8px 10px;
+    font-size: 12.5px;
+    font-family: inherit;
+    width: 100%;
+  }
+  .field input:focus, .field select:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+  .field .hint { font-size: 11px; color: var(--text-subtle); }
+  .field .hint code {
+    font-family: var(--mono);
+    background: var(--surface-2); border-radius: 3px; padding: 0 4px;
+  }
+  .field-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .field-row input { flex: 1; min-width: 180px; }
+  .check-row { display: flex; align-items: center; gap: 9px; }
+  .check-row input { width: 15px; height: 15px; accent-color: var(--accent); }
+  .check-row label { font-size: 12.5px; color: var(--text-muted); }
+
+  .folder-list { display: flex; flex-direction: column; gap: 6px; }
+  .folder-row {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+  }
+  .folder-row span {
+    flex: 1; min-width: 0;
+    font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .folder-row .remove {
-    color: var(--text-subtle); cursor: pointer; padding: 4px 8px; border-radius: 4px;
-    background: transparent; border: none; font-size: 11px;
+    background: transparent; border: none; color: var(--text-subtle);
+    font-size: 11px; cursor: pointer; font-family: inherit;
   }
-  .folder-row .remove:hover { background: var(--danger-soft); color: var(--danger); }
-  .empty-state {
-    padding: 20px; text-align: center; color: var(--text-subtle); font-size: 12px;
-    background: var(--bg); border: 1px dashed var(--border-strong); border-radius: var(--radius);
-  }
+  .folder-row .remove:hover { color: var(--danger); }
 
-  /* Form sections */
-  .section-stack { display: flex; flex-direction: column; gap: 14px; }
-  .section-stack > .section-title {
-    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--text-subtle); padding-bottom: 6px; border-bottom: 1px solid var(--border);
-  }
-
-  /* API key status */
-  .api-status {
-    display: none;
-    padding: 10px;
-    background: var(--success-soft);
-    border: 1px solid var(--success);
-    border-radius: var(--radius);
-    font-size: 12px;
-    margin-top: 8px;
-  }
+  .api-status { display: none; font-size: 11.5px; }
   .api-status.show { display: block; }
-  .api-status .name { color: var(--success); font-weight: 500; margin-bottom: 4px; }
-  .api-status .id {
-    color: var(--text-subtle); font-size: 11px;
-    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  .api-status .name { color: var(--success); }
+  .api-status .id { color: var(--text-subtle); font-family: var(--mono); font-size: 11px; }
+
+  .empty-state {
+    text-align: center; padding: 22px 12px;
+    color: var(--text-subtle); font-size: 12px;
   }
 
-  /* Logs */
-  .log-toolbar {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 12px;
+  /* ── Symbol map ── */
+  .symbol-map-list { display: flex; flex-direction: column; gap: 6px; }
+  .symbol-row {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 10px;
+  }
+  .symbol-row .canonical { font-family: var(--mono); font-weight: 600; font-size: 12px; min-width: 88px; }
+  .symbol-row .arrow { color: var(--text-subtle); }
+  .symbol-row .variants { display: flex; gap: 5px; flex-wrap: wrap; }
+  .variant-chip {
+    font-family: var(--mono); font-size: 10.5px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; color: var(--text-muted);
+  }
+
+  /* ── Logs ── */
+  .log-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; flex-wrap: wrap; }
+  .log-toolbar .spacer { flex: 1; }
+  .log-filter {
+    background: var(--bg); border: 1px solid var(--border-strong);
+    border-radius: 6px; color: var(--text); padding: 5px 8px;
+    font-size: 11.5px; font-family: inherit;
   }
   .log-container {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 10px 12px;
-    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
-    font-size: 11.5px;
-    line-height: 1.6;
-    height: 380px;
+    border-radius: 6px;
+    padding: 9px;
+    max-height: 460px;
     overflow-y: auto;
-    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.65;
   }
-  .log-line { display: flex; gap: 10px; }
-  .log-line .log-time { color: var(--text-subtle); flex-shrink: 0; }
-  .log-line .log-level { width: 50px; flex-shrink: 0; font-weight: 600; text-transform: uppercase; font-size: 10px; }
-  .log-line .log-msg { color: var(--text-muted); word-break: break-word; }
+  .log-line { display: flex; gap: 9px; padding: 1px 0; }
+  .log-time { color: var(--text-subtle); flex-shrink: 0; }
+  .log-level { flex-shrink: 0; width: 42px; text-transform: uppercase; font-size: 9.5px; padding-top: 1px; }
   .log-line.debug .log-level { color: var(--text-subtle); }
   .log-line.info  .log-level { color: var(--accent); }
   .log-line.warn  .log-level { color: var(--warning); }
-  .log-line.warn  .log-msg   { color: var(--text); }
   .log-line.error .log-level { color: var(--danger); }
-  .log-line.error .log-msg   { color: var(--text); }
+  .log-msg { color: var(--text-muted); word-break: break-word; }
 
-  /* Symbol map */
-  .symbol-map-list { display: flex; flex-direction: column; gap: 8px; }
-  .symbol-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 12px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-  }
-  .symbol-row .canonical {
-    font-weight: 600; font-size: 13px; min-width: 90px;
-    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
-  }
-  .symbol-row .arrow { color: var(--text-subtle); font-size: 13px; }
-  .symbol-row .variants { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
-  .variant-chip {
-    padding: 3px 8px;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    font-size: 11px;
-    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
-    color: var(--text-muted);
-  }
+  .info-row { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--mono); font-size: 11px; color: var(--text-subtle); }
+  .info-pair { display: flex; gap: 6px; }
+  .info-key { opacity: 0.65; }
 
-  /* Activity row */
-  .activity {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 12px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-  .activity .activity-label { color: var(--text-subtle); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
-  .activity .activity-value { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace; color: var(--text); }
-
-  /* Watcher info row */
-  .info-row {
-    display: flex; gap: 16px; padding: 10px 14px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
-    font-size: 11px; color: var(--text-subtle);
-    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
-  }
-  .info-row .info-pair { display: flex; gap: 6px; }
-  .info-row .info-pair .info-key { color: var(--text-subtle); }
-  .info-row .info-pair .info-val { color: var(--text-muted); }
-
-  /* Toasts */
-  .toasts {
-    position: fixed; bottom: 16px; right: 16px;
-    display: flex; flex-direction: column-reverse; gap: 8px;
-    z-index: 100;
-    pointer-events: none;
-  }
+  /* ── Toasts ── */
+  .toasts { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
   .toast {
-    pointer-events: auto;
-    min-width: 220px; max-width: 360px;
-    padding: 10px 12px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
     background: var(--surface-2);
-    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 9px 13px;
     font-size: 12px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-    animation: toast-in 0.2s ease;
+    max-width: 340px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
   }
-  .toast.success { border-color: var(--success); }
-  .toast.success::before { content: "✓ "; color: var(--success); font-weight: 700; }
-  .toast.error { border-color: var(--danger); }
-  .toast.error::before { content: "✕ "; color: var(--danger); font-weight: 700; }
-  @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .toast.success { border-left-color: var(--success); }
+  .toast.error { border-left-color: var(--danger); }
 
-  /* Inline checkbox row */
-  .check-row {
-    display: flex; align-items: center; gap: 10px; padding: 4px 0;
+  @media (max-width: 860px) {
+    .acct {
+      grid-template-columns: 4px 1fr 66px;
+      grid-auto-rows: min-content;
+      padding: 8px 12px 10px 0;
+      row-gap: 6px;
+    }
+    .acct .lamp { grid-row: 1 / span 3; }
+    .acct .state { grid-column: 2 / span 2; }
+    .feed { grid-column: auto; text-align: left; }
+    .acct .feed:nth-of-type(1) { grid-column: 2; }
   }
-  .check-row label { font-size: 13px; color: var(--text); cursor: pointer; }
-  .check-row .hint { font-size: 11px; color: var(--text-subtle); margin-top: 2px; }
-
-  /* Scrollbar */
-  ::-webkit-scrollbar { width: 10px; height: 10px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 5px; border: 2px solid var(--bg); }
-  ::-webkit-scrollbar-thumb:hover { background: #525258; }
 </style>
 </head>
 <body>
@@ -416,6 +480,7 @@
     <div class="brand">
       <span class="brand-dot"></span>
       PropFirm Trade Watcher
+      <span class="machine" id="machineLabel">—</span>
     </div>
     <span id="statusPill" class="status-pill stopped">
       <span id="statusIndicator" class="status-dot"></span>
@@ -427,90 +492,159 @@
     <strong>Update available</strong> — version <span id="updateVersion"></span> downloaded. It will install on next quit.
   </div>
 
+  <div class="strip">
+    <div class="cell">
+      <span class="k">Watcher</span>
+      <span class="v" id="stripWatcher">Stopped</span>
+    </div>
+    <div class="cell">
+      <span class="k">Accounts feeding</span>
+      <span class="v" id="stripFeeding">0 / 0</span>
+    </div>
+    <div class="cell">
+      <span class="k">Queue</span>
+      <span class="v" id="stripQueue">0</span>
+    </div>
+    <div class="cell">
+      <span class="k">Errors</span>
+      <span class="v" id="stripErrors">0</span>
+    </div>
+    <div class="grow">
+      <button id="startBtn" class="btn success">Start</button>
+      <button id="stopBtn" class="btn danger" disabled>Stop</button>
+      <button id="refreshBtn" class="btn ghost" title="Refresh now">Refresh</button>
+    </div>
+  </div>
+
   <nav class="tabs">
-    <button class="tab active" data-tab="overview">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
-      Overview
-    </button>
-    <button class="tab" data-tab="settings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      Settings
-    </button>
-    <button class="tab" data-tab="symbol-map">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-      Symbol Map
-    </button>
-    <button class="tab" data-tab="logs">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-      Logs
-    </button>
+    <button class="tab active" data-tab="live">Live</button>
+    <button class="tab" data-tab="attention">Attention <span class="pip" id="attentionPip">0</span></button>
+    <button class="tab" data-tab="health">Health</button>
+    <button class="tab" data-tab="symbols">Symbols</button>
+    <button class="tab" data-tab="logs">Logs</button>
+    <button class="tab" data-tab="settings">Settings</button>
   </nav>
 
   <main>
-    <!-- OVERVIEW -->
-    <section id="overviewPanel" class="panel active">
-      <div class="card status-card">
-        <div class="left">
-          <div class="label">File watcher</div>
-          <div class="value" id="statusValue">Stopped</div>
-        </div>
-        <div class="actions">
-          <button id="startBtn" class="btn success">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Start
-          </button>
-          <button id="stopBtn" class="btn danger" disabled>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-            Stop
-          </button>
-          <button id="refreshBtn" class="btn ghost" title="Refresh stats">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          </button>
-        </div>
-      </div>
-
-      <div class="stats">
-        <div class="stat">
-          <div class="stat-label">Files processed</div>
-          <div class="stat-value" id="filesProcessed">0</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Closed trades</div>
-          <div class="stat-value" id="tradesImported">0</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Open trades</div>
-          <div class="stat-value" id="openTradesImported">0</div>
-        </div>
-        <div class="stat" id="errorsStat">
-          <div class="stat-label">Errors</div>
-          <div class="stat-value" id="errorsCount">0</div>
-          <div class="stat-sub" id="errorsSub"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Last activity</h3>
-        <div class="activity">
-          <span class="activity-label">Last processed</span>
-          <span class="activity-value" id="lastProcessed">No activity yet</span>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Watched folders <span style="color: var(--text-subtle); font-weight: 400; text-transform: none; letter-spacing: 0;">— <span id="watchedFolders">0</span> active</span></h3>
-        <div class="folder-list" id="overviewFolderList"></div>
-      </div>
-
-      <div class="info-row" id="watcherInfoRow">
-        <span class="info-pair"><span class="info-key">version</span><span class="info-val" id="watcherVersion">1.1.0</span></span>
-        <span class="info-pair"><span class="info-key">id</span><span class="info-val" id="watcherIdInfo">—</span></span>
+    <!-- ══ LIVE ══ -->
+    <section id="livePanel" class="panel active">
+      <div id="liveGroups"></div>
+      <div class="info-row">
+        <span class="info-pair"><span class="info-key">version</span><span id="watcherVersion">—</span></span>
+        <span class="info-pair"><span class="info-key">machine</span><span id="watcherMachine">—</span></span>
+        <span class="info-pair"><span class="info-key">id</span><span id="watcherIdInfo">—</span></span>
       </div>
     </section>
 
-    <!-- SETTINGS -->
+    <!-- ══ ATTENTION ══ -->
+    <section id="attentionPanel" class="panel">
+      <div class="hd">Needs you <s>held, not dropped</s></div>
+      <div id="attentionOpen"></div>
+      <div class="hd" style="margin-top:6px;">Resolved <s>kept for the record</s></div>
+      <div id="attentionResolved"></div>
+    </section>
+
+    <!-- ══ HEALTH ══ -->
+    <section id="healthPanel" class="panel">
+      <div class="card">
+        <h3>Build</h3>
+        <div class="tbl-wrap">
+          <table class="tbl" id="buildTable"><tbody></tbody></table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Endpoints — rolling 24 hours</h3>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead>
+              <tr><th>Path</th><th>Last OK</th><th>Last fail</th><th>Calls 24h</th><th>Volume</th></tr>
+            </thead>
+            <tbody id="endpointRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Queue</h3>
+        <div id="queueBody"></div>
+      </div>
+
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn primary" id="copyDiagBtn">Copy diagnostic bundle</button>
+        <button class="btn ghost" id="checkUpdatesBtn2">Check for updates</button>
+      </div>
+    </section>
+
+    <!-- ══ SYMBOLS ══ -->
+    <section id="symbolsPanel" class="panel">
+      <div class="card">
+        <h3>Symbols seen since start</h3>
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+          A symbol resolved by the built-in suffix list is a guess. It is usually right, and
+          when it is wrong it fails quietly — the trade lands under a name the web app has no
+          record of and never appears as a hedge candidate. Add an explicit rule for anything
+          flagged below.
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead>
+              <tr><th>Broker symbol</th><th>Resolved to</th><th>Via</th><th>Seen</th><th>Last</th></tr>
+            </thead>
+            <tbody id="symbolsSeenRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Broker symbol map</h3>
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+          Edit this in the web app under Settings → Symbol Map; the watcher pulls it on startup
+          and on each heartbeat.
+        </div>
+        <div class="symbol-map-list" id="symbolMapList">
+          <div class="empty-state">Loading symbol map…</div>
+        </div>
+        <div style="margin-top:12px;">
+          <button id="refreshSymbolMapBtn" class="btn">Refresh from web app</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ LOGS ══ -->
+    <section id="logsPanel" class="panel">
+      <div class="card">
+        <div class="log-toolbar">
+          <h3 style="margin:0;">Recent logs</h3>
+          <select class="log-filter" id="logLevelFilter">
+            <option value="">All levels</option>
+            <option value="debug">Debug</option>
+            <option value="info">Info</option>
+            <option value="warn">Warning</option>
+            <option value="error">Error</option>
+          </select>
+          <input class="log-filter" id="logSearch" type="text" placeholder="Filter text or account…" style="min-width:180px;">
+          <span class="spacer"></span>
+          <button id="refreshLogs" class="btn sm">Refresh</button>
+        </div>
+        <div id="logContainer" class="log-container">
+          <div class="log-line"><span class="log-msg">Loading logs…</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ SETTINGS ══ -->
     <section id="settingsPanel" class="panel">
       <form id="settingsForm" class="section-stack" autocomplete="off">
+        <div class="card">
+          <h3>This machine</h3>
+          <div class="field">
+            <label for="machineName">Machine name</label>
+            <input type="text" id="machineName" placeholder="Desk PC 2">
+            <span class="hint">Shown in the title bar, the tray tooltip and the web app's watcher list, so several PCs are tellable apart. Defaults to the Windows hostname.</span>
+          </div>
+        </div>
+
         <div class="card">
           <h3>Connection</h3>
           <div class="section-stack">
@@ -522,7 +656,7 @@
             <div class="field">
               <label for="apiKey">API key</label>
               <input type="password" id="apiKey" placeholder="pfm_xxxxxxxxxxxxx" autocomplete="new-password">
-              <div style="display:flex; gap: 8px; align-items:center;">
+              <div class="field-row">
                 <button type="button" id="testApiBtn" class="btn">Test connection</button>
               </div>
               <div id="apiKeyStatus" class="api-status">
@@ -537,9 +671,10 @@
           <h3>Watch folders</h3>
           <div class="field">
             <span class="hint">By default this is your MetaQuotes Common\Files folder. The EAs (with <code>UseCommonFolder=true</code>) write all trade files here.</span>
-            <div class="folder-list" id="folderList" style="margin-top: 8px;"></div>
+            <div class="folder-list" id="folderList" style="margin-top:8px;"></div>
             <div class="field-row">
               <input type="text" id="newFolder" placeholder="C:\Users\...\Common\Files">
+              <button type="button" id="useDefaultFolder" class="btn">Use default</button>
               <button type="button" id="browseFolder" class="btn">Browse</button>
               <button type="button" id="addFolder" class="btn primary">Add</button>
             </div>
@@ -564,51 +699,16 @@
             </div>
             <div class="check-row">
               <input type="checkbox" id="notifications">
-              <label for="notifications">Show desktop notifications when trades import</label>
+              <label for="notifications">Notify me when an account stops feeding</label>
             </div>
           </div>
         </div>
 
-        <div style="display: flex; gap: 8px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button type="submit" class="btn primary">Save settings</button>
           <button type="button" class="btn ghost" id="checkUpdatesBtn">Check for updates</button>
         </div>
       </form>
-    </section>
-
-    <!-- SYMBOL MAP -->
-    <section id="symbol-mapPanel" class="panel">
-      <div class="card">
-        <h3>Broker symbol map</h3>
-        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
-          Maps broker-side symbol variants (XAUUSDm, XAUUSD.r, GOLD#) to canonical names. Edit this in the web app's Settings → Symbol Map page; the watcher pulls it on startup and on each heartbeat.
-        </div>
-        <div class="symbol-map-list" id="symbolMapList">
-          <div class="empty-state">Loading symbol map…</div>
-        </div>
-        <div style="margin-top: 12px;">
-          <button id="refreshSymbolMapBtn" class="btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            Refresh from web app
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <!-- LOGS -->
-    <section id="logsPanel" class="panel">
-      <div class="card" style="padding: 14px;">
-        <div class="log-toolbar">
-          <h3 style="margin: 0;">Recent logs</h3>
-          <button id="refreshLogs" class="btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            Refresh
-          </button>
-        </div>
-        <div id="logContainer" class="log-container">
-          <div class="log-line"><span class="log-msg">Loading logs…</span></div>
-        </div>
-      </div>
     </section>
   </main>
 
@@ -616,7 +716,9 @@
 
   <script>
     let currentSettings = {};
+    let buildInfo = {};
     let refreshInterval;
+    let allLogs = [];
 
     document.addEventListener('DOMContentLoaded', async () => {
       await initialize();
@@ -629,11 +731,8 @@
       try {
         currentSettings = await window.watcherAPI.getSettings();
         applySettingsToForm();
-        await refreshStats();
-        await refreshLogs();
-        await refreshSymbolMap();
+        await Promise.all([refreshAll(), refreshLogs(), refreshSymbolMap()]);
         updateApiKeyStatus();
-        document.getElementById('watcherIdInfo').textContent = currentSettings.watcherId || '—';
       } catch (e) {
         toast('Failed to initialize: ' + e.message, 'error');
       }
@@ -645,188 +744,355 @@
       );
       document.getElementById('startBtn').addEventListener('click', startWatching);
       document.getElementById('stopBtn').addEventListener('click', stopWatching);
-      document.getElementById('refreshBtn').addEventListener('click', refreshStats);
+      document.getElementById('refreshBtn').addEventListener('click', refreshAll);
       document.getElementById('settingsForm').addEventListener('submit', saveSettings);
       document.getElementById('testApiBtn').addEventListener('click', testApiConnection);
       document.getElementById('browseFolder').addEventListener('click', browseFolder);
+      document.getElementById('useDefaultFolder').addEventListener('click', useDefaultFolder);
       document.getElementById('addFolder').addEventListener('click', addFolder);
       document.getElementById('refreshLogs').addEventListener('click', refreshLogs);
       document.getElementById('refreshSymbolMapBtn').addEventListener('click', refreshSymbolMap);
       document.getElementById('checkUpdatesBtn').addEventListener('click', checkForUpdates);
+      document.getElementById('checkUpdatesBtn2').addEventListener('click', checkForUpdates);
+      document.getElementById('copyDiagBtn').addEventListener('click', copyDiagnostics);
+      document.getElementById('logLevelFilter').addEventListener('change', renderLogs);
+      document.getElementById('logSearch').addEventListener('input', renderLogs);
     }
 
     function setupUpdateListeners() {
-      if (window.watcherAPI.onUpdateAvailable) {
-        window.watcherAPI.onUpdateAvailable((info) => {
-          toast(`Update v${info?.version || ''} downloading…`, 'success');
-        });
-      }
-      if (window.watcherAPI.onUpdateDownloaded) {
-        window.watcherAPI.onUpdateDownloaded((info) => {
-          document.getElementById('updateVersion').textContent = info?.version || '';
-          document.getElementById('updateBanner').style.display = 'block';
-        });
-      }
+      window.watcherAPI.onUpdateAvailable?.((info) => {
+        toast(`Update v${info?.version || ''} downloading…`, 'success');
+      });
+      window.watcherAPI.onUpdateDownloaded?.((info) => {
+        document.getElementById('updateVersion').textContent = info?.version || '';
+        document.getElementById('updateBanner').style.display = 'block';
+      });
+      window.watcherAPI.onShowSettings?.(() => switchTab('settings'));
     }
 
-    function applySettingsToForm() {
-      const apiUrlField = document.getElementById('apiUrl');
-      const apiKeyField = document.getElementById('apiKey');
-      if (!apiUrlField.value) apiUrlField.value = currentSettings.apiUrl || '';
-      if (!apiKeyField.value) apiKeyField.value = currentSettings.apiKey || '';
-      document.getElementById('logLevel').value = currentSettings.logLevel || 'info';
-      document.getElementById('autoStart').checked = !!currentSettings.autoStart;
-      document.getElementById('notifications').checked = !!currentSettings.notifications;
-      renderFolderList();
-      renderOverviewFolderList();
-      renderStatus();
+    // ── Formatting ─────────────────────────────────────────────────────────
+
+    /** Mirrors formatAge in src/accountHealth.ts so both sides read alike. */
+    function formatAge(ms) {
+      if (ms === null || ms === undefined) return 'never';
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return `${s}s`;
+      const m = Math.floor(s / 60);
+      if (m < 60) return `${m}m`;
+      const h = Math.floor(m / 60);
+      if (h < 24) return `${h}h ${String(m % 60).padStart(2, '0')}m`;
+      return `${Math.floor(h / 24)}d ${h % 24}h`;
     }
 
-    function renderStatus() {
-      const isRunning = !!currentSettings.isWatching;
-      const pill = document.getElementById('statusPill');
-      const text = document.getElementById('statusText');
-      const value = document.getElementById('statusValue');
-      const startBtn = document.getElementById('startBtn');
-      const stopBtn = document.getElementById('stopBtn');
-      pill.classList.toggle('running', isRunning);
-      pill.classList.toggle('stopped', !isRunning);
-      text.textContent = isRunning ? 'Running' : 'Stopped';
-      value.textContent = isRunning ? 'Running' : 'Stopped';
-      startBtn.disabled = isRunning;
-      stopBtn.disabled = !isRunning;
+    function ageClass(feed) {
+      if (feed.lastAt === null) return 'none';
+      if (feed.overdueFactor >= 20) return 'bad';
+      if (feed.overdue) return 'warn';
+      return 'ok';
     }
 
-    function renderFolderList() {
-      const list = document.getElementById('folderList');
-      const folders = currentSettings.watchFolders || [];
-      list.innerHTML = '';
-      if (folders.length === 0) {
-        list.innerHTML = '<div class="empty-state">No folders configured</div>';
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c =>
+        ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+    }
+
+    function el(tag, className, text) {
+      const n = document.createElement(tag);
+      if (className) n.className = className;
+      if (text !== undefined) n.textContent = text;
+      return n;
+    }
+
+    // ── Live ───────────────────────────────────────────────────────────────
+
+    function renderLive(health) {
+      const host = document.getElementById('liveGroups');
+      host.innerHTML = '';
+
+      if (!health || health.length === 0) {
+        const card = el('div', 'card');
+        card.appendChild(el('div', 'empty-state',
+          currentSettings.isWatching
+            ? 'No account files seen yet. The EAs write every 30–60 seconds; this fills in as they do.'
+            : 'Watcher stopped. Press Start to begin watching for account files.'));
+        host.appendChild(card);
         return;
       }
-      folders.forEach((folder, idx) => {
-        const row = document.createElement('div');
-        row.className = 'folder-row';
-        const span = document.createElement('span');
-        span.textContent = folder;
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'remove';
-        btn.textContent = 'Remove';
-        btn.addEventListener('click', () => removeFolder(idx));
-        row.appendChild(span);
-        row.appendChild(btn);
-        list.appendChild(row);
-      });
-    }
 
-    function renderOverviewFolderList() {
-      const list = document.getElementById('overviewFolderList');
-      const folders = currentSettings.watchFolders || [];
-      list.innerHTML = '';
-      if (folders.length === 0) {
-        list.innerHTML = '<div class="empty-state">No watched folders configured</div>';
-        return;
+      // Grouped by the folder the files arrived in: one group per terminal.
+      const byFolder = new Map();
+      for (const a of health) {
+        const key = a.folder || 'Unknown folder';
+        if (!byFolder.has(key)) byFolder.set(key, []);
+        byFolder.get(key).push(a);
       }
-      folders.forEach(f => {
-        const row = document.createElement('div');
-        row.className = 'folder-row';
-        const span = document.createElement('span');
-        span.textContent = f;
-        row.appendChild(span);
-        list.appendChild(row);
-      });
+
+      for (const [folder, accounts] of byFolder) {
+        const grp = el('div', 'grp');
+        grp.style.marginBottom = '12px';
+
+        const ghead = el('div', 'ghead');
+        ghead.appendChild(el('span', 'gname', `${accounts.length} account${accounts.length === 1 ? '' : 's'}`));
+        ghead.appendChild(el('span', 'gpath', folder));
+        grp.appendChild(ghead);
+
+        for (const a of accounts) grp.appendChild(renderAccountRow(a));
+        host.appendChild(grp);
+      }
     }
 
-    async function startWatching() {
+    function renderAccountRow(a) {
+      const row = el('div', `acct ${a.status}`);
+      row.appendChild(el('span', 'lamp'));
+
+      const who = el('div', 'who');
+      const name = el('span', a.accountName ? 'n' : 'n unlinked', a.accountName || '— not linked —');
+      who.appendChild(name);
+      who.appendChild(el('span', 'num', a.accountNumber));
+      row.appendChild(who);
+
+      const type = (a.accountType || '').toLowerCase();
+      row.appendChild(el('span', `tag ${type}`, a.accountType || '?'));
+
+      const state = el('div', 'state');
+      state.appendChild(el('span', 'word', a.status));
+      state.appendChild(el('span', 'why', a.reason));
+      row.appendChild(state);
+
+      for (const kind of ['closed', 'open', 'state']) {
+        const f = a.feeds.find(x => x.kind === kind);
+        const cell = el('div', 'feed');
+        cell.appendChild(el('span', 'fk', kind === 'state' ? 'balance' : kind));
+        const v = el('span', `fv ${ageClass(f)}`, formatAge(f.age));
+        // The distinction that settles "is it the EA or the watcher": the file
+        // arriving and the POST landing are different facts.
+        if (kind === 'state' && f.lastAt !== null && a.statePostedAt === null) {
+          v.className = 'fv warn';
+          v.title = 'File is arriving but the web app has never accepted a post for it';
+          v.textContent = formatAge(f.age) + '*';
+        }
+        cell.appendChild(v);
+        row.appendChild(cell);
+      }
+
+      const go = el('div', 'go');
+      if (a.status === 'unmatched') {
+        const btn = el('button', 'btn sm primary', 'Link');
+        btn.addEventListener('click', () => relinkAccount(a.accountNumber));
+        go.appendChild(btn);
+      } else if (a.folder) {
+        const btn = el('button', 'btn sm ghost', 'Folder');
+        btn.addEventListener('click', () => window.watcherAPI.openFolder(a.folder));
+        go.appendChild(btn);
+      }
+      row.appendChild(go);
+      return row;
+    }
+
+    async function relinkAccount(accountNumber) {
       try {
-        const r = await window.watcherAPI.startWatching();
+        const r = await window.watcherAPI.relinkAccount(accountNumber);
         if (r.success) {
-          currentSettings.isWatching = true;
-          renderStatus();
-          toast('File watcher started', 'success');
+          toast(r.replayed > 0
+            ? `Re-queued ${r.replayed} held file(s) for ${accountNumber}`
+            : `Nothing held for ${accountNumber}`, 'success');
+          await refreshAll();
         } else {
-          toast('Failed to start: ' + r.error, 'error');
+          toast('Could not replay: ' + r.error, 'error');
         }
       } catch (e) { toast('Error: ' + e.message, 'error'); }
     }
 
-    async function stopWatching() {
-      try {
-        const r = await window.watcherAPI.stopWatching();
-        if (r.success) {
-          currentSettings.isWatching = false;
-          renderStatus();
-          toast('File watcher stopped', 'success');
-        } else {
-          toast('Failed to stop: ' + r.error, 'error');
-        }
-      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    // ── Attention ──────────────────────────────────────────────────────────
+
+    function renderAttention(data) {
+      const openHost = document.getElementById('attentionOpen');
+      const doneHost = document.getElementById('attentionResolved');
+      openHost.innerHTML = '';
+      doneHost.innerHTML = '';
+
+      const open = data?.open || [];
+      const resolved = data?.resolved || [];
+
+      const pip = document.getElementById('attentionPip');
+      pip.textContent = open.length;
+      pip.classList.toggle('show', open.length > 0);
+
+      if (open.length === 0) {
+        openHost.appendChild(el('div', 'card'))
+          .appendChild(el('div', 'empty-state', 'Nothing needs you. Every account is linked and feeding.'));
+      }
+      for (const item of open) openHost.appendChild(renderAttentionCard(item, false));
+
+      if (resolved.length === 0) {
+        doneHost.appendChild(el('div', 'card'))
+          .appendChild(el('div', 'empty-state', 'Nothing resolved yet today.'));
+      }
+      for (const item of resolved) doneHost.appendChild(renderAttentionCard(item, true));
     }
 
-    async function refreshStats() {
-      try {
-        const stats = await window.watcherAPI.getStats();
-        document.getElementById('filesProcessed').textContent = stats.filesProcessed ?? 0;
-        document.getElementById('tradesImported').textContent = stats.tradesImported ?? 0;
-        document.getElementById('openTradesImported').textContent = stats.openTradesImported ?? 0;
-        document.getElementById('errorsCount').textContent = stats.errors ?? 0;
-        document.getElementById('watchedFolders').textContent = (stats.watchedFolders || []).length;
+    function renderAttentionCard(item, done) {
+      const card = el('div', `att ${item.severity}${done ? ' done' : ''}`);
+      card.style.marginBottom = '8px';
 
-        // Surface secondary issue counters under the errors stat
-        const errorsStat = document.getElementById('errorsStat');
-        const errorsSub = document.getElementById('errorsSub');
-        const truncated = stats.truncatedFiles ?? 0;
-        const brokerRej = stats.brokerTimeRejections ?? 0;
-        if (stats.errors > 0) errorsStat.classList.add('danger');
-        else errorsStat.classList.remove('danger');
-        const subParts = [];
-        if (truncated > 0) subParts.push(`${truncated} truncated`);
-        if (brokerRej > 0) subParts.push(`${brokerRej} broker-time rejections`);
-        errorsSub.textContent = subParts.join(' · ');
+      const txt = el('div', 'txt');
+      txt.appendChild(el('span', 't', item.title));
+      txt.appendChild(el('span', 'd', item.detail));
+      card.appendChild(txt);
 
-        const lastProcessed = document.getElementById('lastProcessed');
-        if (stats.lastProcessed) {
-          const d = new Date(stats.lastProcessed);
-          lastProcessed.textContent = d.toLocaleString();
-        } else {
-          lastProcessed.textContent = 'No activity yet';
+      if (done) return card;
+
+      const acts = el('div', 'acts');
+      for (const action of item.actions || []) {
+        if (action === 'link') {
+          const b = el('button', 'btn sm primary', 'Link & replay');
+          b.addEventListener('click', () => relinkAccount(item.accountNumber));
+          acts.appendChild(b);
+        } else if (action === 'open-folder' && item.folder) {
+          const b = el('button', 'btn sm', 'Open folder');
+          b.addEventListener('click', () => window.watcherAPI.openFolder(item.folder));
+          acts.appendChild(b);
+        } else if (action === 'mute') {
+          const b = el('button', 'btn sm ghost', 'Mute 1h');
+          b.addEventListener('click', async () => {
+            await window.watcherAPI.muteAttention(item.id, 60 * 60 * 1000);
+            toast('Muted for an hour', 'success');
+            await refreshAll();
+          });
+          acts.appendChild(b);
+        } else if (action === 'ignore' || action === 'view' || action === 'retry') {
+          const b = el('button', 'btn sm ghost', 'Dismiss');
+          b.addEventListener('click', async () => {
+            await window.watcherAPI.resolveAttention(item.id);
+            await refreshAll();
+          });
+          acts.appendChild(b);
         }
-        currentSettings.isWatching = stats.isRunning;
-        renderStatus();
-      } catch (e) {
-        console.error('refreshStats error', e);
+      }
+      card.appendChild(acts);
+      return card;
+    }
+
+    // ── Health ─────────────────────────────────────────────────────────────
+
+    function renderBuild(info) {
+      const body = document.querySelector('#buildTable tbody');
+      body.innerHTML = '';
+      const upToDate = !info.latest || info.latest === info.running;
+      const rows = [
+        ['Running version', info.running, upToDate ? 'ok' : 'warn'],
+        ['Latest release', info.latest || 'not checked yet', upToDate ? 'ok' : 'warn'],
+        ['Last update check', info.lastCheckedAt ? formatAge(Date.now() - info.lastCheckedAt) + ' ago' : 'never', ''],
+        ['Electron / Node', `${info.electron} / ${info.node}`, ''],
+        ['Machine', info.machine, ''],
+        ['Watcher ID', info.watcherId, ''],
+        ['Accounts cached', String(info.cachedAccounts ?? 0), ''],
+      ];
+      for (const [k, v, cls] of rows) {
+        const tr = document.createElement('tr');
+        const td1 = el('td', 'path', k);
+        const td2 = document.createElement('td');
+        td2.appendChild(el('span', cls, String(v)));
+        td2.style.textAlign = 'right';
+        tr.appendChild(td1); tr.appendChild(td2);
+        body.appendChild(tr);
       }
     }
 
-    async function refreshLogs() {
-      try {
-        const logs = await window.watcherAPI.getLogs();
-        const container = document.getElementById('logContainer');
-        container.innerHTML = '';
-        if (!logs || logs.length === 0) {
-          container.innerHTML = '<div class="log-line"><span class="log-msg" style="color:var(--text-subtle)">No logs yet.</span></div>';
-          return;
+    function renderEndpoints(endpoints) {
+      const body = document.getElementById('endpointRows');
+      body.innerHTML = '';
+      const now = Date.now();
+      const peak = Math.max(1, ...endpoints.flatMap(e => e.buckets));
+
+      for (const e of endpoints) {
+        const tr = document.createElement('tr');
+        if (e.neverCalled) tr.className = 'dead';
+
+        tr.appendChild(el('td', 'path', e.path));
+
+        const ok = document.createElement('td');
+        ok.appendChild(e.neverCalled
+          ? el('span', 'bad', 'never called')
+          : el('span', e.lastOkAt ? 'ok' : 'bad', e.lastOkAt ? formatAge(now - e.lastOkAt) + ' ago' : '—'));
+        tr.appendChild(ok);
+
+        const fail = document.createElement('td');
+        fail.appendChild(e.lastFailAt
+          ? el('span', 'warn', formatAge(now - e.lastFailAt) + ' ago')
+          : el('span', '', '—'));
+        if (e.lastError) fail.title = e.lastError;
+        tr.appendChild(fail);
+
+        const calls = document.createElement('td');
+        calls.appendChild(el('span', e.neverCalled ? 'bad' : '', String(e.calls24h)));
+        tr.appendChild(calls);
+
+        const vol = document.createElement('td');
+        const spark = el('span', 'spark' + (e.calls24h > 2000 ? ' hot' : ''));
+        for (const n of e.buckets) {
+          const bar = document.createElement('i');
+          bar.style.height = `${Math.max(1, Math.round((n / peak) * 14))}px`;
+          spark.appendChild(bar);
         }
-        logs.forEach(log => {
-          const line = document.createElement('div');
-          line.className = `log-line ${log.level}`;
-          const t = document.createElement('span');
-          t.className = 'log-time';
-          t.textContent = new Date(log.timestamp).toLocaleTimeString();
-          const lvl = document.createElement('span');
-          lvl.className = 'log-level';
-          lvl.textContent = log.level;
-          const m = document.createElement('span');
-          m.className = 'log-msg';
-          m.textContent = log.message;
-          line.appendChild(t); line.appendChild(lvl); line.appendChild(m);
-          container.appendChild(line);
-        });
-        container.scrollTop = container.scrollHeight;
-      } catch (e) {
-        console.error('refreshLogs error', e);
+        vol.appendChild(spark);
+        tr.appendChild(vol);
+
+        body.appendChild(tr);
+      }
+    }
+
+    function renderQueue(queue) {
+      const host = document.getElementById('queueBody');
+      host.innerHTML = '';
+      if (!queue || queue.length === 0) {
+        host.appendChild(el('div', 'empty-state', 'Queue is empty — every file seen has been processed.'));
+        return;
+      }
+      const list = el('div', 'folder-list');
+      for (const item of queue.slice(0, 40)) {
+        const row = el('div', 'folder-row');
+        row.appendChild(el('span', '', item.filePath));
+        row.appendChild(el('span', 'id', `priority ${item.priority}`));
+        list.appendChild(row);
+      }
+      host.appendChild(list);
+    }
+
+    async function copyDiagnostics() {
+      try {
+        const r = await window.watcherAPI.copyDiagnostics();
+        toast(r.success ? 'Diagnostics copied to clipboard' : 'Copy failed: ' + r.error,
+              r.success ? 'success' : 'error');
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+
+    // ── Symbols ────────────────────────────────────────────────────────────
+
+    function renderSymbolsSeen(symbols) {
+      const body = document.getElementById('symbolsSeenRows');
+      body.innerHTML = '';
+      if (!symbols || symbols.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 5;
+        td.appendChild(el('div', 'empty-state', 'No symbols seen yet this session.'));
+        tr.appendChild(td);
+        body.appendChild(tr);
+        return;
+      }
+      const now = Date.now();
+      for (const s of symbols) {
+        const tr = document.createElement('tr');
+        if (s.guessed) tr.className = 'dead';
+        tr.appendChild(el('td', 'path', s.raw));
+        tr.appendChild(el('td', '', s.canonical));
+        const via = document.createElement('td');
+        via.appendChild(el('span', s.guessed ? 'warn' : 'ok', s.guessed ? 'suffix guess' : s.via));
+        tr.appendChild(via);
+        tr.appendChild(el('td', '', String(s.count)));
+        tr.appendChild(el('td', '', formatAge(now - s.lastAt) + ' ago'));
+        body.appendChild(tr);
       }
     }
 
@@ -850,7 +1116,7 @@
             <span class="arrow">←</span>
             <div class="variants">
               ${variants.length === 0
-                ? '<span style="color: var(--text-subtle); font-size: 11px;">no variants</span>'
+                ? '<span style="color:var(--text-subtle); font-size:11px;">no variants</span>'
                 : variants.map(v => `<span class="variant-chip">${escapeHtml(v)}</span>`).join('')}
             </div>`;
           list.appendChild(row);
@@ -860,9 +1126,162 @@
       }
     }
 
-    function switchTab(name) {
-      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-      document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `${name}Panel`));
+    // ── Logs ───────────────────────────────────────────────────────────────
+
+    async function refreshLogs() {
+      try {
+        allLogs = (await window.watcherAPI.getLogs()) || [];
+        renderLogs();
+      } catch (e) {
+        console.error('refreshLogs error', e);
+      }
+    }
+
+    function renderLogs() {
+      const container = document.getElementById('logContainer');
+      const level = document.getElementById('logLevelFilter').value;
+      const needle = document.getElementById('logSearch').value.trim().toLowerCase();
+
+      const shown = allLogs.filter(log => {
+        if (level && log.level !== level) return false;
+        if (needle && !String(log.message).toLowerCase().includes(needle)) return false;
+        return true;
+      });
+
+      container.innerHTML = '';
+      if (shown.length === 0) {
+        container.innerHTML = '<div class="log-line"><span class="log-msg" style="color:var(--text-subtle)">Nothing matches.</span></div>';
+        return;
+      }
+      for (const log of shown) {
+        const line = el('div', `log-line ${log.level}`);
+        line.appendChild(el('span', 'log-time', new Date(log.timestamp).toLocaleTimeString()));
+        line.appendChild(el('span', 'log-level', log.level));
+        line.appendChild(el('span', 'log-msg', log.message));
+        container.appendChild(line);
+      }
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // ── Refresh ────────────────────────────────────────────────────────────
+
+    async function refreshAll() {
+      try {
+        const [stats, health, attention, endpoints, build, queue, symbols] = await Promise.all([
+          window.watcherAPI.getStats(),
+          window.watcherAPI.getAccountHealth(),
+          window.watcherAPI.getAttention(),
+          window.watcherAPI.getEndpointStats(),
+          window.watcherAPI.getBuildInfo(),
+          window.watcherAPI.getQueue(),
+          window.watcherAPI.getSymbolsSeen(),
+        ]);
+
+        buildInfo = build;
+        currentSettings.isWatching = stats.isRunning;
+
+        renderStrip(stats, health, queue);
+        renderLive(health);
+        renderAttention(attention);
+        renderEndpoints(endpoints);
+        renderBuild(build);
+        renderQueue(queue);
+        renderSymbolsSeen(symbols);
+        renderStatus();
+
+        document.getElementById('machineLabel').textContent = build.machine || '—';
+        document.getElementById('watcherVersion').textContent = build.running || '—';
+        document.getElementById('watcherMachine').textContent = build.machine || '—';
+        document.getElementById('watcherIdInfo').textContent = build.watcherId || '—';
+      } catch (e) {
+        console.error('refreshAll error', e);
+      }
+    }
+
+    function renderStrip(stats, health, queue) {
+      const feeding = health.filter(a => a.status === 'live').length;
+      const total = health.length;
+      const bad = health.filter(a => a.status === 'down' || a.status === 'unmatched').length;
+      const stale = health.filter(a => a.status === 'stale').length;
+
+      const watcher = document.getElementById('stripWatcher');
+      watcher.textContent = stats.isRunning ? 'Running' : 'Stopped';
+      watcher.className = 'v ' + (stats.isRunning ? 'ok' : 'bad');
+
+      const feed = document.getElementById('stripFeeding');
+      feed.textContent = `${feeding} / ${total}`;
+      feed.className = 'v ' + (bad > 0 ? 'bad' : stale > 0 ? 'wrn' : total > 0 ? 'ok' : '');
+
+      document.getElementById('stripQueue').textContent = (queue || []).length;
+
+      const errs = document.getElementById('stripErrors');
+      const extra = [];
+      if (stats.truncatedFiles > 0) extra.push(`${stats.truncatedFiles} truncated`);
+      if (stats.brokerTimeRejections > 0) extra.push(`${stats.brokerTimeRejections} time-rejected`);
+      errs.textContent = String(stats.errors ?? 0);
+      errs.className = 'v ' + (stats.errors > 0 ? 'bad' : '');
+      errs.title = extra.join(' · ');
+    }
+
+    function renderStatus() {
+      const isRunning = !!currentSettings.isWatching;
+      const pill = document.getElementById('statusPill');
+      pill.classList.toggle('running', isRunning);
+      document.getElementById('statusText').textContent = isRunning ? 'Running' : 'Stopped';
+      document.getElementById('startBtn').disabled = isRunning;
+      document.getElementById('stopBtn').disabled = !isRunning;
+    }
+
+    // ── Watcher control ────────────────────────────────────────────────────
+
+    async function startWatching() {
+      try {
+        const r = await window.watcherAPI.startWatching();
+        if (r.success) { currentSettings.isWatching = true; await refreshAll(); toast('File watcher started', 'success'); }
+        else toast('Failed to start: ' + r.error, 'error');
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+
+    async function stopWatching() {
+      try {
+        const r = await window.watcherAPI.stopWatching();
+        if (r.success) { currentSettings.isWatching = false; await refreshAll(); toast('File watcher stopped', 'success'); }
+        else toast('Failed to stop: ' + r.error, 'error');
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+
+    // ── Settings ───────────────────────────────────────────────────────────
+
+    function applySettingsToForm() {
+      const apiUrlField = document.getElementById('apiUrl');
+      const apiKeyField = document.getElementById('apiKey');
+      if (!apiUrlField.value) apiUrlField.value = currentSettings.apiUrl || '';
+      if (!apiKeyField.value) apiKeyField.value = currentSettings.apiKey || '';
+      document.getElementById('machineName').value = currentSettings.machineName || '';
+      document.getElementById('logLevel').value = currentSettings.logLevel || 'info';
+      document.getElementById('autoStart').checked = !!currentSettings.autoStart;
+      document.getElementById('notifications').checked = !!currentSettings.notifications;
+      renderFolderList();
+      renderStatus();
+    }
+
+    function renderFolderList() {
+      const list = document.getElementById('folderList');
+      const folders = currentSettings.watchFolders || [];
+      list.innerHTML = '';
+      if (folders.length === 0) {
+        list.innerHTML = '<div class="empty-state">No folders configured</div>';
+        return;
+      }
+      folders.forEach((folder, idx) => {
+        const row = el('div', 'folder-row');
+        row.appendChild(el('span', '', folder));
+        const btn = el('button', 'remove', 'Remove');
+        btn.type = 'button';
+        btn.addEventListener('click', () => removeFolder(idx));
+        row.appendChild(btn);
+        list.appendChild(row);
+      });
     }
 
     async function saveSettings(e) {
@@ -870,6 +1289,7 @@
       const settings = {
         apiUrl: document.getElementById('apiUrl').value,
         apiKey: document.getElementById('apiKey').value,
+        machineName: document.getElementById('machineName').value,
         watchFolders: currentSettings.watchFolders || [],
         logLevel: document.getElementById('logLevel').value,
         autoStart: document.getElementById('autoStart').checked,
@@ -879,11 +1299,9 @@
         const r = await window.watcherAPI.saveSettings(settings);
         if (r.success) {
           currentSettings = { ...currentSettings, ...settings };
-          renderOverviewFolderList();
+          await refreshAll();
           toast('Settings saved', 'success');
-        } else {
-          toast('Failed to save settings', 'error');
-        }
+        } else toast('Failed to save settings', 'error');
       } catch (e) { toast('Error: ' + e.message, 'error'); }
     }
 
@@ -908,15 +1326,11 @@
 
     function updateApiKeyStatus() {
       const status = document.getElementById('apiKeyStatus');
-      const name = document.getElementById('apiKeyName');
-      const id = document.getElementById('watcherId');
       if (currentSettings.apiKey && currentSettings.apiKey.trim().length > 0) {
-        name.textContent = currentSettings.apiKeyName || 'API key configured';
-        id.textContent = `Watcher ID: ${currentSettings.watcherId || 'pending registration'}`;
+        document.getElementById('apiKeyName').textContent = currentSettings.apiKeyName || 'API key configured';
+        document.getElementById('watcherId').textContent = `Watcher ID: ${currentSettings.watcherId || 'pending registration'}`;
         status.classList.add('show');
-      } else {
-        hideApiKeyStatus();
-      }
+      } else hideApiKeyStatus();
     }
     function hideApiKeyStatus() {
       document.getElementById('apiKeyStatus').classList.remove('show');
@@ -929,6 +1343,12 @@
       } catch (e) { toast('Error: ' + e.message, 'error'); }
     }
 
+    function useDefaultFolder() {
+      const def = currentSettings.defaultWatchFolder;
+      if (!def) return toast('No default known for this platform', 'error');
+      document.getElementById('newFolder').value = def;
+    }
+
     function addFolder() {
       const inp = document.getElementById('newFolder');
       const v = inp.value.trim();
@@ -938,7 +1358,6 @@
       currentSettings.watchFolders.push(v);
       inp.value = '';
       renderFolderList();
-      renderOverviewFolderList();
       toast('Folder added — remember to save settings', 'success');
     }
 
@@ -946,7 +1365,6 @@
       if (!currentSettings.watchFolders) return;
       currentSettings.watchFolders.splice(idx, 1);
       renderFolderList();
-      renderOverviewFolderList();
       toast('Folder removed — remember to save settings', 'success');
     }
 
@@ -954,22 +1372,24 @@
       try {
         const r = await window.watcherAPI.checkForUpdates();
         if (r.success) {
-          if (r.updateInfo?.version) {
-            toast(`Update v${r.updateInfo.version} found`, 'success');
-          } else {
-            toast('You are on the latest version', 'success');
-          }
-        } else {
-          toast('Update check failed: ' + r.error, 'error');
-        }
+          toast(r.updateInfo?.version && r.updateInfo.version !== buildInfo.running
+            ? `Update v${r.updateInfo.version} found`
+            : 'You are on the latest version', 'success');
+          await refreshAll();
+        } else toast('Update check failed: ' + r.error, 'error');
       } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+
+    // ── Chrome ─────────────────────────────────────────────────────────────
+
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+      document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `${name}Panel`));
     }
 
     function toast(message, type = 'success') {
       const wrap = document.getElementById('toasts');
-      const t = document.createElement('div');
-      t.className = `toast ${type}`;
-      t.textContent = message;
+      const t = el('div', `toast ${type}`, message);
       wrap.appendChild(t);
       setTimeout(() => {
         t.style.transition = 'opacity 0.2s, transform 0.2s';
@@ -979,17 +1399,15 @@
       }, 3500);
     }
 
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
-    }
-
     function startAutoRefresh() {
-      refreshInterval = setInterval(refreshStats, 10000);
+      // Five seconds: the fastest EA feed is 30s, so this is comfortably
+      // quicker than anything it displays without being busy work.
+      refreshInterval = setInterval(refreshAll, 5000);
     }
 
     window.addEventListener('beforeunload', () => {
       if (refreshInterval) clearInterval(refreshInterval);
-      if (window.watcherAPI.removeAllListeners) window.watcherAPI.removeAllListeners();
+      window.watcherAPI.removeAllListeners?.();
     });
   </script>
 </body>

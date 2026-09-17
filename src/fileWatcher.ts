@@ -4,6 +4,8 @@ import * as path from 'path';
 import csv from 'csv-parser';
 import { app } from 'electron';
 import { ApiClient } from './apiClient';
+import { AccountHealthTracker, AccountHealthSnapshot } from './accountHealth';
+import { AttentionCenter, AttentionItem } from './attention';
 import { Logger } from './logger';
 import Store from 'electron-store';
 
@@ -89,6 +91,13 @@ export class FileWatcher {
   private isProcessingQueue = false;
   private queueFilePath: string;
 
+  /** Per-account feed health — the data behind the Live screen. */
+  private health = new AccountHealthTracker();
+  /** Things the watcher could not handle, held for the operator. */
+  private attention = new AttentionCenter();
+  /** Where files for unlinked accounts are kept instead of being dropped. */
+  private heldDir: string;
+
   constructor(
     private apiClient: ApiClient,
     private logger: Logger,
@@ -115,6 +124,7 @@ export class FileWatcher {
       userDataPath = process.cwd();
     }
     this.queueFilePath = path.join(userDataPath, 'pending-queue.json');
+    this.heldDir = path.join(userDataPath, 'held');
 
     this.loadPersistedQueue();
   }
@@ -238,6 +248,96 @@ export class FileWatcher {
 
   public getStats(): FileWatcherStats {
     return { ...this.stats };
+  }
+
+  public getAccountHealth(): AccountHealthSnapshot[] {
+    return this.health.snapshot();
+  }
+
+  public getAttention(): { open: AttentionItem[]; resolved: AttentionItem[] } {
+    return this.attention.snapshot(this.health.snapshot());
+  }
+
+  public getQueue(): { filePath: string; priority: number; timestamp: number }[] {
+    return [...this.processingQueue];
+  }
+
+  public resolveAttention(id: string): boolean {
+    return this.attention.resolve(id);
+  }
+
+  public muteAttention(id: string, ms: number): void {
+    this.attention.mute(id, ms);
+  }
+
+  /**
+   * Re-queues files that were held because their account had no match. Called
+   * after the operator links the account in the web app, so the data that
+   * arrived while it was unlinked is not lost.
+   */
+  public replayHeldFiles(accountNumber: string): number {
+    const dir = path.join(this.heldDir, accountNumber);
+    if (!fs.existsSync(dir)) return 0;
+
+    this.apiClient.clearAccountCache(accountNumber);
+    const files = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.csv'));
+    for (const f of files) {
+      this.addToProcessingQueue(path.join(dir, f));
+    }
+    this.attention.resolve(`unmatched:${accountNumber}`);
+    this.logger.info(`Replaying ${files.length} held file(s) for account ${accountNumber}`);
+    return files.length;
+  }
+
+  public heldFileCount(accountNumber: string): number {
+    const dir = path.join(this.heldDir, accountNumber);
+    if (!fs.existsSync(dir)) return 0;
+    return fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.csv')).length;
+  }
+
+  /**
+   * Keeps a copy of a file whose account could not be linked. Named by kind
+   * rather than timestamped, so a terminal writing every 30s leaves one file
+   * per kind rather than filling the disk overnight.
+   */
+  private holdFile(accountNumber: string, filePath: string): number {
+    try {
+      const dir = path.join(this.heldDir, accountNumber);
+      // A replayed file is ALREADY in the held directory. Copying it onto
+      // itself would truncate it, destroying the very data being held.
+      if (path.resolve(filePath).startsWith(path.resolve(dir))) {
+        return this.heldFileCount(accountNumber);
+      }
+      fs.mkdirSync(dir, { recursive: true });
+      fs.copyFileSync(filePath, path.join(dir, path.basename(filePath)));
+      return this.heldFileCount(accountNumber);
+    } catch (error) {
+      this.logger.warn(`Could not hold file for ${accountNumber}: ${error instanceof Error ? error.message : String(error)}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Removes a replayed file once it has been imported. Held files exist only
+   * to survive the window where an account was unlinked; keeping them after a
+   * successful import would re-import the same rows on the next replay.
+   */
+  private discardIfHeld(filePath: string): void {
+    if (!path.resolve(filePath).startsWith(path.resolve(this.heldDir))) return;
+    try {
+      fs.unlinkSync(filePath);
+      this.logger.debug(`Discarded held file after successful import: ${path.basename(filePath)}`);
+    } catch (error) {
+      this.logger.debug(`Could not discard held file: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** One place for "this account number has no match in the web app". */
+  private handleUnmatched(accountNumber: string, filePath: string, extra?: string): void {
+    const held = this.holdFile(accountNumber, filePath);
+    this.health.markUnmatched(accountNumber, held);
+    this.attention.unmatchedAccount(accountNumber, held, path.dirname(filePath), extra);
+    this.logger.warn(`Held file for unlinked account ${accountNumber} (${held} held)`);
   }
 
   private async cleanupOldFiles(): Promise<void> {
@@ -417,6 +517,7 @@ export class FileWatcher {
       this.processedFiles.add(fileKey);
       this.stats.filesProcessed++;
       this.stats.lastProcessed = new Date().toISOString();
+      this.discardIfHeld(filePath);
 
       // Clean up old processed file references (keep last 1000)
       if (this.processedFiles.size > 1000) {
@@ -440,6 +541,10 @@ export class FileWatcher {
       return;
     }
 
+    // The feed is healthy the moment a file parses, whether or not it holds
+    // trades: an account with nothing closed today is still exporting.
+    this.health.recordFeed(accountInfo.accountNumber, 'closed', path.dirname(filePath));
+
     if (trades.length === 0) {
       this.logger.info(`No trades found in: ${path.basename(filePath)}`);
       return;
@@ -449,9 +554,18 @@ export class FileWatcher {
     const matchedAccount = await this.apiClient.findAccountByNumber(accountInfo.accountNumber);
     
     if (!matchedAccount) {
-      this.logger.warn(`No matching account found for: ${accountInfo.accountNumber}`);
+      this.handleUnmatched(
+        accountInfo.accountNumber,
+        filePath,
+        `${trades.length} closed trade${trades.length === 1 ? '' : 's'}`
+      );
       return;
     }
+    this.health.link(accountInfo.accountNumber, {
+      id: matchedAccount.id,
+      name: matchedAccount.name,
+      accountType: matchedAccount.type
+    });
 
     // Check for duplicate trades
     const newTrades = await this.apiClient.filterNewTrades(matchedAccount.id, trades);
@@ -551,14 +665,29 @@ export class FileWatcher {
     }
 
     this.logger.info(`Found ${openTrades.length} open trades in file`);
+    this.health.recordFeed(accountInfo.accountNumber, 'open', path.dirname(filePath));
+    this.health.recordOpenPositions(
+      accountInfo.accountNumber,
+      openTrades.length,
+      describeOpenTrades(openTrades)
+    );
 
     // Find matching account in web app
     const matchedAccount = await this.apiClient.findAccountByNumber(accountInfo.accountNumber);
     
     if (!matchedAccount) {
-      this.logger.warn(`No matching account found for: ${accountInfo.accountNumber}`);
+      this.handleUnmatched(
+        accountInfo.accountNumber,
+        filePath,
+        `${openTrades.length} open · balance ${accountInfo.accountCurrency} ${accountInfo.accountBalance}`
+      );
       return;
     }
+    this.health.link(accountInfo.accountNumber, {
+      id: matchedAccount.id,
+      name: matchedAccount.name,
+      accountType: matchedAccount.type
+    });
 
     // Get recent closed trades for this account to help with proper exit times
     const recentClosedTrades = this.recentClosedTrades.get(matchedAccount.id) || [];
@@ -624,13 +753,32 @@ export class FileWatcher {
         return;
       }
 
+      this.health.recordFeed(stateData.accountNumber, 'state', path.dirname(filePath));
+
       const matchedAccount = await this.apiClient.findAccountByNumber(stateData.accountNumber);
       if (!matchedAccount) {
-        this.logger.debug(`Account state file for unknown account: ${stateData.accountNumber}`);
+        this.handleUnmatched(
+          stateData.accountNumber,
+          filePath,
+          `balance ${stateData.balance} · equity ${stateData.equity}`
+        );
         return;
       }
+      this.health.link(stateData.accountNumber, {
+        id: matchedAccount.id,
+        name: matchedAccount.name,
+        accountType: matchedAccount.type
+      });
 
-      await this.apiClient.postAccountState(matchedAccount.id, stateData);
+      // Recorded only on success. The file arriving and the POST landing are
+      // different facts, and telling them apart is what distinguishes an EA
+      // that is not exporting from a watcher that is not sending.
+      const posted = await this.apiClient.postAccountState(matchedAccount.id, stateData);
+      if (posted) {
+        this.health.recordStatePosted(stateData.accountNumber);
+      } else {
+        this.attention.sendFailed('/api/accounts/state', `Account ${stateData.accountNumber}: POST rejected`);
+      }
     } catch (error) {
       this.logger.warn(`Error handling account state file: ${error instanceof Error ? error.message : String(error)}`);
       this.stats.errors++;
@@ -923,6 +1071,7 @@ export class FileWatcher {
           if (rowCount > 10000) {
             this.logger.warn(`Row limit exceeded (10000), stopping CSV parsing — file is TRUNCATED`);
             this.stats.truncatedFiles++;
+            this.attention.truncatedFile(accountNumberFromFileName(filePath), path.basename(filePath));
             stream.destroy();
             return;
           }
@@ -1239,6 +1388,7 @@ export class FileWatcher {
           if (rowCount > 10000) {
             this.logger.warn(`Row limit exceeded (10000), stopping CSV parsing — file is TRUNCATED`);
             this.stats.truncatedFiles++;
+            this.attention.truncatedFile(accountNumberFromFileName(filePath), path.basename(filePath));
             stream.destroy();
             return;
           }
@@ -1430,6 +1580,11 @@ export class FileWatcher {
     if (Math.abs(offset) > FileWatcher.MAX_BROKER_OFFSET_MS) {
       this.logger.warn(`Broker offset ${(offset / 3600000).toFixed(1)}h exceeds sane range; treating broker time as UTC. Check host clock.`);
       this.stats.brokerTimeRejections++;
+      this.attention.brokerTimeRejection(
+        'host',
+        'timestamp shift',
+        `broker clock is ${(offset / 3600000).toFixed(1)}h from this PC's clock`
+      );
       return 0;
     }
     return offset;
@@ -1459,4 +1614,29 @@ export class FileWatcher {
       return new Date().toISOString();
     }
   }
+}
+
+/**
+ * One line summarising what an account currently holds, for the Live row:
+ * "2 open · XAUUSD 0.40 lots". Collapses to the dominant symbol because the
+ * desk trades XAUUSD almost exclusively and a list of one repeated symbol
+ * reads as noise.
+ */
+function describeOpenTrades(openTrades: OpenTradeData[]): string | null {
+  if (openTrades.length === 0) return 'flat';
+
+  const lots = openTrades.reduce((n, t) => n + (Number(t.size) || 0), 0);
+  const symbols = [...new Set(openTrades.map(t => t.symbol).filter(Boolean))];
+  const symbolText = symbols.length === 1 ? symbols[0] : `${symbols.length} symbols`;
+
+  return `${openTrades.length} open · ${symbolText} ${lots.toFixed(2)} lots`;
+}
+
+/**
+ * All three export filenames carry the account number, so a failure that
+ * happens before the header is parsed can still be attributed to an account.
+ */
+function accountNumberFromFileName(filePath: string): string {
+  const m = path.basename(filePath).match(/_(\d+)_/) || path.basename(filePath).match(/(\d+)/);
+  return m ? m[1] : 'unknown';
 }
