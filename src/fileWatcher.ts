@@ -590,7 +590,10 @@ export class FileWatcher {
       ticketNumber: trade.ticket,
       exitTime: trade.closeTime,
       exitPrice: trade.closePrice,
-      netPnl: trade.profit
+      netPnl: trade.profit,
+      // Raw MT5 profit excludes these; the server deducts them at auto-close.
+      commission: trade.commission,
+      swap: trade.swap
     }));
     
     this.recentClosedTrades.set(matchedAccount.id, recentTrades);
