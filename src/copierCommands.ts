@@ -4,19 +4,23 @@ import * as os from 'os';
 import * as path from 'path';
 
 /**
- * Dashboard → watcher commands (set an FX Blue receiver's lot, rescan). The watcher
+ * Dashboard → watcher commands (set an FX Blue receiver's lot, rename a channel, repair a
+ * link, rescan). The watcher
  * polls for claimed commands, runs them one at a time, posts the outcome and never retries.
  */
 
 // Copied from the web app's app/utils/copierCommands.ts.
-export type CommandType = 'setReceiverLot' | 'rescan';
+export type CommandType = 'setReceiverLot' | 'rescan' | 'renameChannel' | 'repair';
+export type RepairAction = 'attachExporter' | 'attachSender' | 'pointSender' | 'invertOn';
 export type CommandStatus = 'queued' | 'claimed' | 'done' | 'failed' | 'expired';
 export type WatcherCommand = {
   id: string; watcherId: string; type: CommandType; status: CommandStatus;
   payload: { accountNumber?: string; channel?: string; lot?: number;
-             propLogin?: string; brokerLogin?: string };
+             propLogin?: string; brokerLogin?: string;
+             oldChannel?: string; newChannel?: string; action?: RepairAction };
   createdAt: string; claimedAt: string | null; finishedAt: string | null;
-  result: { oldLot?: number; newLot?: number } | null; error: string | null;
+  result: { oldLot?: number; newLot?: number; before?: Record<string, string>; after?: Record<string, string> } | null;
+  error: string | null;
 };
 /** What scripts/copier-set-input.ps1 writes: the -Set keys' values before and on read-back. */
 export type SetInputResult = {
@@ -29,10 +33,17 @@ export type SetLotResult = {
   ok: boolean; oldLot: number | null; newLot: number | null; chartFile: string | null;
   step: string | null; error: string | null;
 };
+/** What scripts/copier-attach.ps1 writes. */
+export type AttachResult = { ok: boolean; step: string | null; error: string | null };
+export type AttachArgs = { login: string; ea: 'exporter' | 'sender'; channel?: string; baseSet?: string };
 export type ResultBody = { status: 'done' | 'failed'; result?: object; error?: string };
 export type DispatchDeps = {
   openPositions(login: string): Promise<number | null>;
   runSetLot(channel: string, lot: number): Promise<SetLotResult>;
+  runSetInput(args: SetInputArgs): Promise<SetInputResult>;
+  runAttach(args: AttachArgs): Promise<AttachResult>;
+  /** The sender settings the last scan kept for this login, or null. */
+  keptSenderSet(login: string): string | null;
   rescan(): Promise<void>;
   postResult: (id: string, body: ResultBody) => Promise<boolean>;
 };
@@ -42,28 +53,77 @@ const FRESH_TRADES_MS = 5 * 60 * 1000;
 /** While gold is closed the exporter stops writing; its last file is trusted only if this recent. */
 const CLOSED_MAX_AGE_MS = 72 * 3600 * 1000;
 
+const BAD_PAYLOAD: ResultBody = { status: 'failed', error: 'Bad command payload' };
+const OPEN_TRADE: ResultBody = { status: 'failed', error: 'Open trade or no fresh trade data' };
+const why = (r: { step: string | null; error: string | null }) => `${r.step ?? 'unknown'}: ${r.error ?? 'failed'}`;
+
+/** Re-check just before touching MT4/MT5: the server's check may be seconds old. */
+async function flat(deps: DispatchDeps, propLogin: string, brokerLogin: string): Promise<boolean> {
+  const [prop, broker] = await Promise.all([deps.openPositions(propLogin), deps.openPositions(brokerLogin)]);
+  return prop === 0 && broker === 0;
+}
+
+/** Receiver first, then sender; if the sender fails, put the receiver's old name back. */
+async function renameChannel(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBody> {
+  const { propLogin, brokerLogin, oldChannel, newChannel } = cmd.payload;
+  if (!propLogin || !brokerLogin || !oldChannel || !newChannel) return BAD_PAYLOAD;
+  if (!(await flat(deps, propLogin, brokerLogin))) return OPEN_TRADE;
+  const recv = await deps.runSetInput({ role: 'receiver', channel: oldChannel, set: { Channel: newChannel } });
+  if (!recv.ok) return { status: 'failed', error: `receiver: ${why(recv)}` };
+  const send = await deps.runSetInput({ role: 'sender', login: propLogin, set: { Channel: newChannel } });
+  if (send.ok) return { status: 'done', result: { before: { Channel: oldChannel }, after: { Channel: newChannel } } };
+  const back = await deps.runSetInput({ role: 'receiver', channel: newChannel, set: { Channel: oldChannel } });
+  if (back.ok) return { status: 'failed', error: `sender: ${why(send)} (receiver restored)` };
+  return { status: 'failed', error: `MISMATCH: receiver ${newChannel}, sender ${oldChannel}` };
+}
+
+async function repair(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBody> {
+  const { action, propLogin, brokerLogin, newChannel, channel } = cmd.payload;
+  if (!propLogin) return BAD_PAYLOAD;
+  // The exporter doesn't touch the link, and a missing exporter during a trade is exactly when it's needed.
+  if (action === 'attachExporter') {
+    const r = await deps.runAttach({ login: propLogin, ea: 'exporter' });
+    return r.ok ? { status: 'done' } : { status: 'failed', error: why(r) };
+  }
+  if (!brokerLogin) return BAD_PAYLOAD;
+  const needs = action === 'invertOn' ? channel : newChannel;
+  if (!needs || (action !== 'attachSender' && action !== 'pointSender' && action !== 'invertOn')) return BAD_PAYLOAD;
+  if (!(await flat(deps, propLogin, brokerLogin))) return OPEN_TRADE;
+  if (action === 'attachSender') {
+    const r = await deps.runAttach({ login: propLogin, ea: 'sender', channel: needs, baseSet: deps.keptSenderSet(propLogin) ?? undefined });
+    return r.ok ? { status: 'done' } : { status: 'failed', error: why(r) };
+  }
+  const r = action === 'pointSender'
+    ? await deps.runSetInput({ role: 'sender', login: propLogin, set: { Channel: needs } })
+    : await deps.runSetInput({ role: 'receiver', channel: needs, set: { InvertTrades: 'true' } });
+  return r.ok
+    ? { status: 'done', result: { before: r.before ?? undefined, after: r.after ?? undefined } }
+    : { status: 'failed', error: why(r) };
+}
+
 async function run(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBody> {
   if (cmd.type === 'rescan') {
     await deps.rescan();
     return { status: 'done' };
   }
+  if (cmd.type === 'renameChannel') return renameChannel(cmd, deps);
+  if (cmd.type === 'repair') return repair(cmd, deps);
   if (cmd.type !== 'setReceiverLot') return { status: 'failed', error: 'Unknown command' };
   const { propLogin, brokerLogin, channel, lot } = cmd.payload;
-  if (!propLogin || !brokerLogin || !channel || typeof lot !== 'number') {
-    return { status: 'failed', error: 'Bad command payload' };
-  }
-  // Re-check just before touching MT4: the server's check may be seconds old.
-  const [prop, broker] = await Promise.all([deps.openPositions(propLogin), deps.openPositions(brokerLogin)]);
-  if (prop !== 0 || broker !== 0) return { status: 'failed', error: 'Open trade or no fresh trade data' };
+  if (!propLogin || !brokerLogin || !channel || typeof lot !== 'number') return BAD_PAYLOAD;
+  if (!(await flat(deps, propLogin, brokerLogin))) return OPEN_TRADE;
   const r = await deps.runSetLot(channel, lot);
   if (r.ok) return { status: 'done', result: { oldLot: r.oldLot ?? undefined, newLot: r.newLot ?? undefined } };
-  return { status: 'failed', error: `${r.step ?? 'unknown'}: ${r.error ?? 'failed'}` };
+  return { status: 'failed', error: why(r) };
 }
+
+/** Commands that change a copier EA, so the board needs a fresh scan afterwards. */
+const CHANGES: ReadonlySet<CommandType> = new Set(['setReceiverLot', 'renameChannel', 'repair']);
 
 /**
  * Runs one command and posts its outcome. Never retries; a throw becomes `failed`.
- * After a lot change attempt, whatever the outcome, it rescans so the board shows the
- * real lot. The result is posted first and the rescan isn't awaited: a scan can take
+ * After any change attempt (lot, rename, repair), whatever the outcome, it rescans so the
+ * board shows the real state. The result is posted first and the rescan isn't awaited: a scan can take
  * minutes, and the poller must stay free to claim the next command before it expires.
  */
 export async function dispatch(cmd: WatcherCommand, deps: DispatchDeps): Promise<void> {
@@ -74,7 +134,7 @@ export async function dispatch(cmd: WatcherCommand, deps: DispatchDeps): Promise
     body = { status: 'failed', error: error instanceof Error ? error.message : String(error) };
   }
   await deps.postResult(cmd.id, body);
-  if (cmd.type === 'setReceiverLot') void deps.rescan().catch(() => undefined);
+  if (CHANGES.has(cmd.type)) void deps.rescan().catch(() => undefined);
 }
 
 /** Polls every `everyMs`; runs the returned commands one at a time, oldest first, and skips a tick while busy. */
@@ -162,6 +222,21 @@ export async function runPsScript<T>(scriptPath: string, args: string[], timeout
   } finally {
     fs.rmSync(outFile, { force: true });
   }
+}
+
+/** Runs the bundled copier-attach script. */
+export function runAttachScript(scriptPath: string, a: AttachArgs): Promise<AttachResult> {
+  const args = ['-Login', a.login, '-Expert', a.ea];
+  if (a.channel) args.push('-Channel', a.channel);
+  if (a.baseSet) args.push('-BaseSet', a.baseSet);
+  return runPsScript<AttachResult>(scriptPath, args, SET_LOT_TIMEOUT_MS);
+}
+
+/** %LOCALAPPDATA%\copier\sets\<login>-sender.set, kept by the scan, if it exists. */
+export function keptSenderSetPath(login: string, localAppData = process.env.LOCALAPPDATA ?? ''): string | null {
+  if (!localAppData || !/^\d+$/.test(login.trim())) return null;
+  const file = path.join(localAppData, 'copier', 'sets', `${login.trim()}-sender.set`);
+  return fs.existsSync(file) ? file : null;
 }
 
 /** Runs the bundled copier-set-input script on one receiver or sender. */
