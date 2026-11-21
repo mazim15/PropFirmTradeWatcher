@@ -10,6 +10,7 @@ import { ApiClient } from './apiClient';
 import { Logger, LogLevel } from './logger';
 import { SymbolMap } from './symbolNormaliser';
 import { runCopierScan, startCopierSchedule } from './copierScanner';
+import { dispatch, openPositionsIn, runSetLotScript, startCommandPoller } from './copierCommands';
 
 // Resolves the platform-appropriate default watch folder. The MT4/MT5 EAs
 // write to the terminal common folder (FILE_COMMON), which on Windows is
@@ -33,6 +34,9 @@ class TradeWatcherApp {
   private watcherId: string = '';
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private stopCopierSchedule: (() => void) | null = null;
+  private stopCommandPoller: (() => void) | null = null;
+  /** Scans and lot changes both drive MT4/MT5 dialogs, so they run one after another. */
+  private copierQueue: Promise<unknown> = Promise.resolve();
   private registrationRetryTimeout: NodeJS.Timeout | null = null;
   /** Drives the staleness alarm and the tray colour. */
   private healthInterval: NodeJS.Timeout | null = null;
@@ -262,12 +266,27 @@ class TradeWatcherApp {
    */
   private startCopierScans(): void {
     if (this.stopCopierSchedule || process.platform !== 'win32') return;
-    const scriptPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'scripts', 'copier-scan.ps1')
-      : path.join(__dirname, '..', 'scripts', 'copier-scan.ps1');
-    this.stopCopierSchedule = startCopierSchedule(async () => {
+    this.stopCopierSchedule = startCopierSchedule(() => this.copierScan());
+    this.logger.info('Copier scan scheduled');
+    this.startCommandPoller();
+  }
+
+  private copierScript(name: string): string {
+    return app.isPackaged
+      ? path.join(process.resourcesPath, 'scripts', name)
+      : path.join(__dirname, '..', 'scripts', name);
+  }
+
+  private copierExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.copierQueue.then(fn, fn);
+    this.copierQueue = next.catch(() => undefined);
+    return next;
+  }
+
+  private copierScan(): Promise<void> {
+    return this.copierExclusive(async () => {
       try {
-        const endpoints = await runCopierScan(scriptPath, this.watcherId, this.machineLabel());
+        const endpoints = await runCopierScan(this.copierScript('copier-scan.ps1'), this.watcherId, this.machineLabel());
         const ok = await this.apiClient.postCopierScan(this.watcherId, endpoints);
         if (ok) this.logger.info(`Copier scan: ${endpoints.length} endpoints posted`);
         else this.logger.warn(`Copier scan: ${endpoints.length} endpoints found, post failed`);
@@ -275,7 +294,28 @@ class TradeWatcherApp {
         this.logger.error(`Copier scan failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     });
-    this.logger.info('Copier scan scheduled');
+  }
+
+  /** Dashboard commands (set receiver lot, rescan): polled every 5s, run one at a time, never retried. */
+  private startCommandPoller(): void {
+    if (this.stopCommandPoller) return;
+    this.stopCommandPoller = startCommandPoller(
+      () => this.apiClient.fetchCommands(this.watcherId),
+      async cmd => {
+        const t0 = Date.now();
+        this.logger.info(`Command ${cmd.id} ${cmd.type} started`);
+        await dispatch(cmd, {
+          openPositions: async login => openPositionsIn(this.store.get('watchFolders') as string[], login),
+          runSetLot: (channel, lot) => this.copierExclusive(() => runSetLotScript(this.copierScript('copier-set-lot.ps1'), channel, lot)),
+          rescan: () => this.copierScan(),
+          postResult: async (id, body) => {
+            this.logger.info(`Command ${id} ${cmd.type} ${body.status}${body.error ? `: ${body.error}` : ''} in ${Date.now() - t0}ms`);
+            return this.apiClient.postCommandResult(id, this.watcherId, body);
+          },
+        });
+      },
+    );
+    this.logger.info('Copier command poller started');
   }
 
   private async refreshSymbolMap(): Promise<void> {

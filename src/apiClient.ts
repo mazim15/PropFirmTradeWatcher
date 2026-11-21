@@ -4,6 +4,7 @@ import { Logger } from './logger';
 import { explainSymbol, SymbolResolution, SymbolMap } from './symbolNormaliser';
 import { EndpointStats, EndpointSnapshot } from './endpointStats';
 import type { CopierEndpoint } from './copierScan';
+import type { ResultBody, WatcherCommand } from './copierCommands';
 
 // Retry transient failures (network errors, 5xx). Don't retry 4xx — those
 // are deterministic (bad request, unauthorized, etc) and won't recover.
@@ -450,6 +451,32 @@ export class ApiClient {
       return response.status === 200;
     } catch (error) {
       this.logger.warn(`postCopierScan failed: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
+  /** Claims this watcher's queued dashboard commands (polled every 5s, so no retry). [] on error. */
+  public async fetchCommands(watcherId: string): Promise<WatcherCommand[]> {
+    try {
+      const response = await this.axiosInstance.get('/api/watcher/commands', { params: { watcherId } });
+      return Array.isArray(response.data?.commands) ? response.data.commands : [];
+    } catch (error) {
+      this.logger.debug(`fetchCommands failed: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  }
+
+  /** Posts a claimed command's outcome. */
+  public async postCommandResult(id: string, watcherId: string, body: ResultBody): Promise<boolean> {
+    try {
+      const response = await withRetry(
+        () => this.axiosInstance.post(`/api/watcher/commands/${encodeURIComponent(id)}/result`, { watcherId, ...body }),
+        this.logger,
+        'postCommandResult'
+      );
+      return response.status === 200;
+    } catch (error) {
+      this.logger.warn(`postCommandResult failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }
