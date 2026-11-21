@@ -5,6 +5,9 @@
 # presses OK, Load or Remove. Only dialogs this run opened are touched; dialogs that were
 # already open are left alone. Controls are addressed by ID or name only.
 #
+# Each sender's clean read is kept as %LOCALAPPDATA%\copier\sets\<login>-sender.set (overwritten
+# every scan), so a sender that later goes missing can be re-attached with its last good settings.
+#
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File copier-scan.ps1 -OutFile <path>
 # Writes { scannedAt, terminals: [{ kind, path, dataFolder, login, error, eas: [{ title, set }] }] }
 # as UTF-8 JSON and exits 0, even when individual terminals fail.
@@ -13,6 +16,9 @@ param([Parameter(Mandatory = $true)][string]$OutFile)
 $ErrorActionPreference = 'Stop'
 $scanDir = Join-Path $env:TEMP 'copier-scan'
 New-Item -ItemType Directory -Force $scanDir | Out-Null
+$keepDir = Join-Path $env:LOCALAPPDATA 'copier\sets'
+New-Item -ItemType Directory -Force $keepDir | Out-Null
+$keepLogin = ''  # login of the terminal being scanned; set per terminal below
 $terminals = New-Object System.Collections.Generic.List[object]
 $scannedAt = (Get-Date).ToUniversalTime().ToString('o')
 
@@ -29,6 +35,12 @@ public class CopierWin {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern IntPtr GetMenu(IntPtr h);
+  [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr m);
+  [DllImport("user32.dll")] public static extern IntPtr GetSubMenu(IntPtr m, int pos);
+  [DllImport("user32.dll")] public static extern uint GetMenuState(IntPtr m, uint id, uint flags);
 }
 "@
 $A = [System.Windows.Automation.AutomationElement]
@@ -36,6 +48,28 @@ $W = [CopierWin]
 $Z = [IntPtr]::Zero
 # Every dialog this run opened, so the final cleanup can cancel any still open.
 $opened = New-Object System.Collections.Generic.List[IntPtr]
+
+# A minimized terminal ignores menu commands (the Expert List won't open), so show it without
+# taking focus while this run works on it, and minimize it again afterwards.
+$minimized = New-Object System.Collections.Generic.List[IntPtr]
+function Unminimize($h) {
+  if ($W::IsIconic($h)) { [void]$W::ShowWindow($h, 4); $minimized.Add($h); Start-Sleep -Milliseconds 800 }  # SW_SHOWNOACTIVATE
+}
+function Reminimize { foreach ($h in $minimized) { if ($W::IsWindow($h)) { [void]$W::ShowWindow($h, 7) } }; $minimized.Clear() }  # SW_SHOWMINNOACTIVE
+
+# MT5 greys out Charts -> Expert List while the terminal runs no EA, and then ignores the command.
+# Menu states are refreshed when their popup opens, so refresh the one holding the item first.
+function No-Experts($main) {
+  $menu = $W::GetMenu($main)
+  for ($i = 0; $i -lt $W::GetMenuItemCount($menu); $i++) {
+    $sub = $W::GetSubMenu($menu, $i)
+    if ($sub -ne $Z -and $W::GetMenuState($sub, [uint32]33015, 0) -ne [uint32]::MaxValue) {
+      [void]$W::SendMessage($main, 0x0117, $sub, [IntPtr]$i)  # WM_INITMENUPOPUP
+      return (($W::GetMenuState($sub, [uint32]33015, 0) -band 3) -ne 0)  # MF_GRAYED | MF_DISABLED
+    }
+  }
+  $false
+}
 
 function T($h) { $sb = New-Object System.Text.StringBuilder 512; [void]$W::GetWindowText($h, $sb, 512); $sb.ToString() }
 
@@ -106,7 +140,12 @@ function Read-Properties($procId, $props, $tag) {
     if ($W::IsWindow($save)) { Cancel-Dialog $save }
     if (!(Test-Path $file)) { throw "'$title': settings file was not saved" }
     $text = [IO.File]::ReadAllText($file)
-    Remove-Item $file -Force -ErrorAction SilentlyContinue
+    if ($title -match 'TradeCopy Sender' -and $script:keepLogin) {
+      # Keeping a copy must never fail the scan.
+      try { Move-Item $file (Join-Path $keepDir "$($script:keepLogin)-sender.set") -Force } catch { Remove-Item $file -Force -ErrorAction SilentlyContinue }
+    } else {
+      Remove-Item $file -Force -ErrorAction SilentlyContinue
+    }
     return @{ title = $title; set = $text }
   } finally {
     Cancel-Dialog $props
@@ -153,6 +192,7 @@ function Scan-MT5($p, $eas) {
   $before = Dialogs $p.Id
   [void]$W::PostMessage($p.MainWindowHandle, 0x0111, [IntPtr]33015, $Z)  # Charts -> Expert List
   $list = New-Dialog $p.Id $before 3 'Experts'
+  if ($list -eq $Z -and (No-Experts $p.MainWindowHandle)) { return }  # no EA at all: report none
   if ($list -eq $Z) { throw 'Expert List did not open' }
   try {
     $lv = $W::GetDlgItem($list, 10309)
@@ -182,12 +222,15 @@ try {
       $installDir = Split-Path $p.Path -Parent
       $dataFolder = Data-Folder $installDir
       $login = [regex]::Match((T $p.MainWindowHandle), '^\s*(\d+)').Groups[1].Value
+      $script:keepLogin = $login
+      Unminimize $p.MainWindowHandle
       if ($kind -eq 'mt4') { Scan-MT4 $p $eas } else { Scan-MT5 $p $eas }
     } catch {
       $err = $_.Exception.Message
     } finally {
       foreach ($h in $opened) { Cancel-Dialog $h }
       $opened.Clear()
+      Reminimize
     }
     $terminals.Add([ordered]@{ kind = $kind; path = $installDir; dataFolder = $dataFolder; login = $login; error = $err; eas = $eas })
   }
