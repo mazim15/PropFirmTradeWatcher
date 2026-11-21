@@ -3,6 +3,7 @@ import { TradeData, OpenTradeData, AccountStateData } from './fileWatcher';
 import { Logger } from './logger';
 import { explainSymbol, SymbolResolution, SymbolMap } from './symbolNormaliser';
 import { EndpointStats, EndpointSnapshot } from './endpointStats';
+import type { CopierEndpoint } from './copierScan';
 
 // Retry transient failures (network errors, 5xx). Don't retry 4xx — those
 // are deterministic (bad request, unauthorized, etc) and won't recover.
@@ -434,6 +435,21 @@ export class ApiClient {
       return response.status === 200;
     } catch (error) {
       this.logger.debug(`postAccountState failed: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
+  /** Replaces this watcher's copier endpoints on the server with the latest scan. */
+  public async postCopierScan(watcherId: string, endpoints: CopierEndpoint[]): Promise<boolean> {
+    try {
+      const response = await withRetry(
+        () => this.axiosInstance.post('/api/watcher/copier-scan', { watcherId, endpoints }),
+        this.logger,
+        'postCopierScan'
+      );
+      return response.status === 200;
+    } catch (error) {
+      this.logger.warn(`postCopierScan failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }

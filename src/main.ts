@@ -9,6 +9,7 @@ import { FileWatcher } from './fileWatcher';
 import { ApiClient } from './apiClient';
 import { Logger, LogLevel } from './logger';
 import { SymbolMap } from './symbolNormaliser';
+import { runCopierScan, startCopierSchedule } from './copierScanner';
 
 // Resolves the platform-appropriate default watch folder. The MT4/MT5 EAs
 // write to the terminal common folder (FILE_COMMON), which on Windows is
@@ -31,6 +32,7 @@ class TradeWatcherApp {
   private store: Store<Record<string, unknown>>;
   private watcherId: string = '';
   private heartbeatInterval: NodeJS.Timeout | null = null;
+  private stopCopierSchedule: (() => void) | null = null;
   private registrationRetryTimeout: NodeJS.Timeout | null = null;
   /** Drives the staleness alarm and the tray colour. */
   private healthInterval: NodeJS.Timeout | null = null;
@@ -186,6 +188,7 @@ class TradeWatcherApp {
           // Pull latest user symbol map so suffix/alias rules are fresh.
           await this.refreshSymbolMap();
           this.startHeartbeat();
+          this.startCopierScans();
           succeeded = true;
         } else {
           this.logger.error('Failed to register watcher with web app.');
@@ -250,6 +253,29 @@ class TradeWatcherApp {
     }, 5 * 60 * 1000); // 5 minutes
 
     this.logger.info('Heartbeat system started');
+  }
+
+  /**
+   * Copier management: 3 minutes after start (e.g. after a reboot), then daily, scan the
+   * running MT4/MT5 terminals' copier settings and post them. Started once per process;
+   * re-registration reuses it, since each run reads the current API client and label.
+   */
+  private startCopierScans(): void {
+    if (this.stopCopierSchedule || process.platform !== 'win32') return;
+    const scriptPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'scripts', 'copier-scan.ps1')
+      : path.join(__dirname, '..', 'scripts', 'copier-scan.ps1');
+    this.stopCopierSchedule = startCopierSchedule(async () => {
+      try {
+        const endpoints = await runCopierScan(scriptPath, this.watcherId, this.machineLabel());
+        const ok = await this.apiClient.postCopierScan(this.watcherId, endpoints);
+        if (ok) this.logger.info(`Copier scan: ${endpoints.length} endpoints posted`);
+        else this.logger.warn(`Copier scan: ${endpoints.length} endpoints found, post failed`);
+      } catch (error) {
+        this.logger.error(`Copier scan failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+    this.logger.info('Copier scan scheduled');
   }
 
   private async refreshSymbolMap(): Promise<void> {
