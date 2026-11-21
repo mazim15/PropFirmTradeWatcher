@@ -5,6 +5,9 @@
 # presses OK, Load or Remove. Only dialogs this run opened are touched; dialogs that were
 # already open are left alone. Controls are addressed by ID or name only.
 #
+# Each sender's clean read is kept as %LOCALAPPDATA%\copier\sets\<login>-sender.set (overwritten
+# every scan), so a sender that later goes missing can be re-attached with its last good settings.
+#
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File copier-scan.ps1 -OutFile <path>
 # Writes { scannedAt, terminals: [{ kind, path, dataFolder, login, error, eas: [{ title, set }] }] }
 # as UTF-8 JSON and exits 0, even when individual terminals fail.
@@ -13,6 +16,9 @@ param([Parameter(Mandatory = $true)][string]$OutFile)
 $ErrorActionPreference = 'Stop'
 $scanDir = Join-Path $env:TEMP 'copier-scan'
 New-Item -ItemType Directory -Force $scanDir | Out-Null
+$keepDir = Join-Path $env:LOCALAPPDATA 'copier\sets'
+New-Item -ItemType Directory -Force $keepDir | Out-Null
+$keepLogin = ''  # login of the terminal being scanned; set per terminal below
 $terminals = New-Object System.Collections.Generic.List[object]
 $scannedAt = (Get-Date).ToUniversalTime().ToString('o')
 
@@ -106,7 +112,12 @@ function Read-Properties($procId, $props, $tag) {
     if ($W::IsWindow($save)) { Cancel-Dialog $save }
     if (!(Test-Path $file)) { throw "'$title': settings file was not saved" }
     $text = [IO.File]::ReadAllText($file)
-    Remove-Item $file -Force -ErrorAction SilentlyContinue
+    if ($title -match 'TradeCopy Sender' -and $script:keepLogin) {
+      # Keeping a copy must never fail the scan.
+      try { Move-Item $file (Join-Path $keepDir "$($script:keepLogin)-sender.set") -Force } catch { Remove-Item $file -Force -ErrorAction SilentlyContinue }
+    } else {
+      Remove-Item $file -Force -ErrorAction SilentlyContinue
+    }
     return @{ title = $title; set = $text }
   } finally {
     Cancel-Dialog $props
@@ -182,6 +193,7 @@ try {
       $installDir = Split-Path $p.Path -Parent
       $dataFolder = Data-Folder $installDir
       $login = [regex]::Match((T $p.MainWindowHandle), '^\s*(\d+)').Groups[1].Value
+      $script:keepLogin = $login
       if ($kind -eq 'mt4') { Scan-MT4 $p $eas } else { Scan-MT5 $p $eas }
     } catch {
       $err = $_.Exception.Message
