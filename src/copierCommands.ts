@@ -33,6 +33,8 @@ export type DispatchDeps = {
 
 const SET_LOT_TIMEOUT_MS = 3 * 60 * 1000;
 const FRESH_TRADES_MS = 5 * 60 * 1000;
+/** While gold is closed the exporter stops writing; its last file is trusted only if this recent. */
+const CLOSED_MAX_AGE_MS = 72 * 3600 * 1000;
 
 async function run(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBody> {
   if (cmd.type === 'rescan') {
@@ -97,7 +99,22 @@ export function countOpenRows(text: string): number | null {
   return lines.slice(h + 1).filter(l => l.trim() && !l.startsWith('#')).length;
 }
 
-/** Open positions for a login from the newest open_trades_<login>_latest.csv; null if none is fresh. */
+/**
+ * Gold's weekend close, Fri 22:00 → Sun 22:00 UTC. The real close is Fri 21:00/22:00 →
+ * Sun 22:00/23:00 UTC depending on US daylight time, so this window always sits inside it.
+ * ponytail: no holidays or daily break; those just refuse with "no fresh trade data".
+ */
+export function goldClosed(nowMs: number): boolean {
+  const d = new Date(nowMs);
+  const day = d.getUTCDay(), h = d.getUTCHours();
+  return day === 6 || (day === 5 && h >= 22) || (day === 0 && h < 22);
+}
+
+/**
+ * Open positions for a login from the newest open_trades_<login>_latest.csv; null if it can't be trusted.
+ * The exporter's timer runs on server time, which stops between ticks, so while gold is closed its last
+ * file (from the close) is used as long as it's under 72h old. While open, it must be under 5 minutes old.
+ */
 export function openPositionsIn(folders: string[], login: string, nowMs = Date.now()): number | null {
   let newest: { file: string; mtime: number } | null = null;
   for (const folder of folders) {
@@ -107,7 +124,8 @@ export function openPositionsIn(folders: string[], login: string, nowMs = Date.n
       if (!newest || mtime > newest.mtime) newest = { file, mtime };
     } catch { /* not in this folder */ }
   }
-  if (!newest || nowMs - newest.mtime > FRESH_TRADES_MS) return null;
+  const maxAge = goldClosed(nowMs) ? CLOSED_MAX_AGE_MS : FRESH_TRADES_MS;
+  if (!newest || nowMs - newest.mtime > maxAge) return null;
   try { return countOpenRows(fs.readFileSync(newest.file, 'utf8')); } catch { return null; }
 }
 

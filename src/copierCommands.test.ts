@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { countOpenRows, dispatch, startCommandPoller, type DispatchDeps, type SetLotResult, type WatcherCommand } from './copierCommands';
+import { countOpenRows, dispatch, goldClosed, openPositionsIn, startCommandPoller, type DispatchDeps, type SetLotResult, type WatcherCommand } from './copierCommands';
 
 const cmd = (p: Partial<WatcherCommand> = {}): WatcherCommand => ({
   id: 'c1', watcherId: 'w1', type: 'setReceiverLot', status: 'claimed',
@@ -100,4 +100,36 @@ test('set lot does not wait for the follow-up rescan, so the poller can claim th
   assert.equal(calls.rescan, 1);
   assert.equal(calls.posted[0].body.status, 'done');
   finishScan();
+});
+
+test('openPositionsIn: fresh file required while gold is open, last file trusted while closed', () => {
+  const fs = require('fs') as typeof import('fs'); const os = require('os') as typeof import('os'); const path = require('path') as typeof import('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ot-'));
+  const head = 'Ticket,OpenTime,Type,Size,Symbol,OpenPrice,StopLoss,TakeProfit,CurrentPrice,Commission,Swap,UnrealizedPnl,Comment,Status,Magic\n';
+  const write = (login: string, rows: number, writtenIso: string) => {
+    const f = path.join(dir, `open_trades_${login}_latest.csv`);
+    fs.writeFileSync(f, head + '1,x,buy,0.1,XAUUSD,1,0,0,1,0,0,0,,Open,0\n'.repeat(rows));
+    const t = new Date(writtenIso); fs.utimesSync(f, t, t);
+  };
+  const friClose = '2026-11-20T21:59:00Z';
+  write('flat', 0, friClose);
+  write('open', 1, friClose);
+  write('old', 0, '2026-11-13T21:59:00Z');
+  const sat = Date.parse('2026-11-21T12:00:00Z');
+  assert.equal(openPositionsIn([dir], 'flat', sat), 0);             // closed: last file trusted
+  assert.equal(openPositionsIn([dir], 'open', sat), 1);             // closed, but it shows a trade
+  assert.equal(openPositionsIn([dir], 'old', sat), null);           // closed, file from last week
+  assert.equal(openPositionsIn([dir], 'flat', Date.parse('2026-11-23T10:00:00Z')), null); // Monday: stale
+  assert.equal(openPositionsIn([dir], 'flat', Date.parse('2026-11-27T21:00:00Z')), null); // next Fri before 22:00 UTC: still open, file stale
+  assert.equal(openPositionsIn([dir], 'missing', sat), null);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('goldClosed covers Fri 22:00 to Sun 22:00 UTC only', () => {
+  assert.equal(goldClosed(Date.parse('2026-11-20T21:59:00Z')), false);
+  assert.equal(goldClosed(Date.parse('2026-11-20T22:00:00Z')), true);
+  assert.equal(goldClosed(Date.parse('2026-11-21T12:00:00Z')), true);
+  assert.equal(goldClosed(Date.parse('2026-11-22T21:59:00Z')), true);
+  assert.equal(goldClosed(Date.parse('2026-11-22T22:00:00Z')), false);
+  assert.equal(goldClosed(Date.parse('2026-11-18T12:00:00Z')), false);
 });
