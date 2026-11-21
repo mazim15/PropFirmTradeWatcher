@@ -40,6 +40,9 @@ public class CopierInputWin {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern uint GetMenuState(IntPtr m, uint id, uint flags);
   [DllImport("user32.dll")] public static extern IntPtr GetMenu(IntPtr h);
   [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr m);
   [DllImport("user32.dll")] public static extern IntPtr GetSubMenu(IntPtr m, int pos);
@@ -52,6 +55,28 @@ $W = [CopierInputWin]
 $Z = [IntPtr]::Zero
 # Every dialog this run opened, so the final cleanup can cancel any still open.
 $opened = New-Object System.Collections.Generic.List[IntPtr]
+
+# A minimized terminal ignores menu commands (the Expert List won't open), so show it without
+# taking focus while this run works on it, and minimize it again afterwards.
+$minimized = New-Object System.Collections.Generic.List[IntPtr]
+function Unminimize($h) {
+  if ($W::IsIconic($h)) { [void]$W::ShowWindow($h, 4); $minimized.Add($h); Start-Sleep -Milliseconds 800 }  # SW_SHOWNOACTIVATE
+}
+function Reminimize { foreach ($h in $minimized) { if ($W::IsWindow($h)) { [void]$W::ShowWindow($h, 7) } }; $minimized.Clear() }  # SW_SHOWMINNOACTIVE
+
+# MT5 greys out Charts -> Expert List while the terminal runs no EA, and then ignores the command.
+# Menu states are refreshed when their popup opens, so refresh the one holding the item first.
+function No-Experts($main) {
+  $menu = $W::GetMenu($main)
+  for ($i = 0; $i -lt $W::GetMenuItemCount($menu); $i++) {
+    $sub = $W::GetSubMenu($menu, $i)
+    if ($sub -ne $Z -and $W::GetMenuState($sub, [uint32]33015, 0) -ne [uint32]::MaxValue) {
+      [void]$W::SendMessage($main, 0x0117, $sub, [IntPtr]$i)  # WM_INITMENUPOPUP
+      return (($W::GetMenuState($sub, [uint32]33015, 0) -band 3) -ne 0)  # MF_GRAYED | MF_DISABLED
+    }
+  }
+  $false
+}
 
 function T($h) { $sb = New-Object System.Text.StringBuilder 512; [void]$W::GetWindowText($h, $sb, 512); $sb.ToString() }
 
@@ -215,6 +240,7 @@ try {
     foreach ($proc in @(Get-Process terminal -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne $Z })) {
       $m = $W::FindWindowEx($proc.MainWindowHandle, $Z, 'MDIClient', [NullString]::Value)
       if ($m -eq $Z) { continue }
+      Unminimize $proc.MainWindowHandle
       $act = $W::SendMessage($m, 0x0229, $Z, $Z)  # WM_MDIGETACTIVE
       $frames = @(); $c = $Z
       while (($c = $W::FindWindowEx($m, $c, [NullString]::Value, [NullString]::Value)) -ne $Z) { $frames += $c }
@@ -229,12 +255,15 @@ try {
       }
       if ($target -ne $Z) { break }
       if ($act -ne $Z -and $W::IsWindow($act)) { [void]$W::SendMessage($m, 0x0222, $act, $Z) }
+      Reminimize  # not this terminal; the one that has the receiver stays shown until the end
     }
     if ($target -eq $Z) { throw "no receiver with channel $Channel" }
   } else {
     $p = @(Get-Process terminal64 -ErrorAction SilentlyContinue |
       Where-Object { $_.MainWindowHandle -ne $Z -and (T $_.MainWindowHandle) -match "^\s*$Login\b" }) | Select-Object -First 1
     if (!$p) { throw "no MT5 terminal for login $Login" }
+    Unminimize $p.MainWindowHandle
+    if (No-Experts $p.MainWindowHandle) { throw 'No sender in terminal' }
     $list = Open-ExpertList $p
     $count = [int]$W::SendMessage(($W::GetDlgItem($list, 10309)), 0x1004, $Z, $Z)  # LVM_GETITEMCOUNT
     $rows = @()
@@ -314,6 +343,7 @@ try {
 } finally {
   foreach ($h in $opened) { Cancel-Dialog $h }
   if ($mdi -ne $Z -and $active -ne $Z -and $W::IsWindow($active)) { [void]$W::SendMessage($mdi, 0x0222, $active, $Z) }
+  Reminimize
   Get-ChildItem $workDir -Filter '*.set' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
   [IO.File]::WriteAllText($OutFile, ($res | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
 }

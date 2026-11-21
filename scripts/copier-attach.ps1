@@ -1,11 +1,14 @@
 # Attach the trade exporter or the FX Blue TradeCopy Sender to an MT5 terminal, on a new chart.
 #
-# Opens a new XAUUSD chart (File -> New Chart -> ... -> XAUUSD, found by menu text), inserts the EA
-# (Insert -> Experts -> ..., found by menu text), and for the sender loads settings with -Channel
-# set: -BaseSet when given (the last good settings kept by the scan), else the EA's defaults.
-# Presses OK, checks the Expert List grew by exactly one, then File -> Profiles -> Save. Always a
-# new chart: one chart holds one EA, so attaching to an existing chart would replace it. On any
-# failure every dialog this run opened is cancelled, and a chart it opened that got no EA is closed.
+# Writes a chart template holding the EA as the terminal's Templates\default.tpl, which MT5 applies
+# to every new chart, opens a new XAUUSD chart (File -> New Chart -> ... -> XAUUSD, found by menu
+# text), and puts the previous default.tpl back at once. No dialog is involved: Insert -> Experts
+# only lists the 5 most recently used EAs, and MT5's Save Template dialog ignores the typed name. The
+# sender's inputs are -BaseSet when given (the last good settings kept by the scan), else the EA's
+# defaults, with Channel set to -Channel. Checks the Expert List grew by exactly one, then
+# File -> Profiles -> Save. Always a new chart: one chart holds one EA, so attaching to an existing
+# chart would replace it. On any failure every dialog this run opened is cancelled, default.tpl is
+# restored, and a chart it opened that got no EA is closed.
 #
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File copier-attach.ps1
 #          -Login <digits> -Expert exporter|sender [-Channel <name>] [-BaseSet <path>] -OutFile <path>
@@ -37,6 +40,9 @@ public class CopierAttachWin {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern uint GetMenuState(IntPtr m, uint id, uint flags);
   [DllImport("user32.dll")] public static extern IntPtr GetMenu(IntPtr h);
   [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr m);
   [DllImport("user32.dll")] public static extern IntPtr GetSubMenu(IntPtr m, int pos);
@@ -48,6 +54,28 @@ $A = [System.Windows.Automation.AutomationElement]
 $W = [CopierAttachWin]
 $Z = [IntPtr]::Zero
 $opened = New-Object System.Collections.Generic.List[IntPtr]
+
+# A minimized terminal ignores menu commands (the Expert List won't open), so show it without
+# taking focus while this run works on it, and minimize it again afterwards.
+$minimized = New-Object System.Collections.Generic.List[IntPtr]
+function Unminimize($h) {
+  if ($W::IsIconic($h)) { [void]$W::ShowWindow($h, 4); $minimized.Add($h); Start-Sleep -Milliseconds 800 }  # SW_SHOWNOACTIVATE
+}
+function Reminimize { foreach ($h in $minimized) { if ($W::IsWindow($h)) { [void]$W::ShowWindow($h, 7) } }; $minimized.Clear() }  # SW_SHOWMINNOACTIVE
+
+# MT5 greys out Charts -> Expert List while the terminal runs no EA, and then ignores the command.
+# Menu states are refreshed when their popup opens, so refresh the one holding the item first.
+function No-Experts($main) {
+  $menu = $W::GetMenu($main)
+  for ($i = 0; $i -lt $W::GetMenuItemCount($menu); $i++) {
+    $sub = $W::GetSubMenu($menu, $i)
+    if ($sub -ne $Z -and $W::GetMenuState($sub, [uint32]33015, 0) -ne [uint32]::MaxValue) {
+      [void]$W::SendMessage($main, 0x0117, $sub, [IntPtr]$i)  # WM_INITMENUPOPUP
+      return (($W::GetMenuState($sub, [uint32]33015, 0) -band 3) -ne 0)  # MF_GRAYED | MF_DISABLED
+    }
+  }
+  $false
+}
 
 function T($h) { $sb = New-Object System.Text.StringBuilder 512; [void]$W::GetWindowText($h, $sb, 512); $sb.ToString() }
 
@@ -124,6 +152,7 @@ function Find-Leaf($m, $text) {
 }
 
 function Expert-Count($p) {
+  if (No-Experts $p.MainWindowHandle) { return 0 }
   $before = Dialogs $p.Id
   [void]$W::PostMessage($p.MainWindowHandle, 0x0111, [IntPtr]33015, $Z)  # Charts -> Expert List
   $l = New-Dialog $p.Id $before 3 'Experts'
@@ -134,9 +163,33 @@ function Expert-Count($p) {
 }
 
 function Frames($mdi) { $l = @(); $c = $Z; while (($c = $W::FindWindowEx($mdi, $c, [NullString]::Value, [NullString]::Value)) -ne $Z) { $l += $c }; , $l }
-function Enc($path) { if ([IO.File]::ReadAllBytes($path)[0] -eq 0xFF) { [Text.Encoding]::Unicode } else { [Text.Encoding]::Default } }
 
-$props = $Z; $mdi = $Z; $newChart = $Z; $attached = $false
+$EA_NAME = @{ exporter = 'MT5_TradeExporter'; sender = 'FX Blue - TradeCopy Sender' }
+# expertmode as found in working profiles on azeem-pc (sender 4, exporter 0).
+$EA_MODE = @{ exporter = 0; sender = 4 }
+# The exporter's inputs from a working profile; its defaults are not known to be the same.
+$EXPORTER_INPUTS = @('ExportIntervalMinutes=1', 'OpenTradesIntervalSeconds=30', 'ExportFolderPath=', 'EnableExport=true',
+  'EnableOpenTrades=true', 'EnableLogging=true', 'MaxHistoryDays=90')
+
+function Data-Folder($installDir) {
+  $root = Join-Path $env:APPDATA 'MetaQuotes\Terminal'
+  if (Test-Path $root) {
+    foreach ($d in Get-ChildItem $root -Directory) {
+      $o = Join-Path $d.FullName 'origin.txt'
+      if ((Test-Path $o) -and ((Get-Content $o -Raw).Trim().TrimEnd('\') -ieq $installDir.TrimEnd('\'))) { return $d.FullName }
+    }
+  }
+  $installDir  # portable mode: data lives in the install folder
+}
+
+$props = $Z; $mdi = $Z; $newChart = $Z; $attached = $false; $tplFile = $null; $tplBackup = $null; $swapped = $false
+# Put back the default.tpl this run replaced (or remove the one it wrote). Safe to call twice.
+function Restore-DefaultTemplate {
+  if (!$script:swapped) { return }
+  Remove-Item $script:tplFile -Force -ErrorAction SilentlyContinue
+  if (Test-Path $script:tplBackup) { Move-Item $script:tplBackup $script:tplFile -Force }
+  $script:swapped = $false
+}
 try {
   if ($Login -notmatch '^\d+$') { throw 'bad -Login' }
   if ($Expert -eq 'sender' -and $Channel -notmatch '^[A-Za-z0-9_-]{1,32}$') { throw 'sender needs a valid -Channel' }
@@ -147,77 +200,58 @@ try {
     Where-Object { $_.MainWindowHandle -ne $Z -and (T $_.MainWindowHandle) -match "^\s*$Login\b" }) | Select-Object -First 1
   if (!$p) { throw "no MT5 terminal for login $Login" }
   $main = $p.MainWindowHandle
+  Unminimize $main
   $menu = $W::GetMenu($main)
   $mdi = $W::FindWindowEx($main, $Z, 'MDIClient', [NullString]::Value)
   if ($mdi -eq $Z) { throw 'MDIClient not found' }
   $chartId = Find-Leaf (Sub-Menu $menu 'File/New Chart') 'XAUUSD'
   if ($null -eq $chartId) { throw 'File/New Chart/.../XAUUSD not found' }
-  $eaName = if ($Expert -eq 'exporter') { 'MT5_TradeExporter' } else { 'FX Blue - TradeCopy Sender' }
-  $eaId = Find-Leaf (Sub-Menu $menu 'Insert/Experts') $eaName
-  if ($null -eq $eaId) { throw "Insert/Experts/.../$eaName not found" }
+  $dataDir = Data-Folder (Split-Path $p.Path -Parent)
+  $eaFile = Join-Path $dataDir "MQL5\Experts\$($EA_NAME[$Expert]).ex5"
+  if (!(Test-Path $eaFile)) { throw "$($EA_NAME[$Expert]).ex5 is not installed in this terminal" }
+  $tplFile = Join-Path $dataDir 'MQL5\Profiles\Templates\default.tpl'
+  $tplBackup = "$tplFile.copier-$stamp"
   $count0 = Expert-Count $p
 
-  # 2. chart: a new XAUUSD chart, made active.
+  # 2. template: default.tpl with the EA, so the next new chart gets it.
+  $step = 'template'
+  if ($Expert -eq 'exporter') {
+    $inputs = $EXPORTER_INPUTS
+  } else {
+    $lines = if ($BaseSet -and (Test-Path $BaseSet)) { [IO.File]::ReadAllText($BaseSet) -split "`r?`n" } else { @() }
+    # .set values may end in ||min||step||max||flag; a template holds the value only.
+    $inputs = @($lines | Where-Object { $_ -match '^\w+=' -and $_ -notmatch '^Channel=' } | ForEach-Object { ($_ -split '\|\|')[0] })
+    $inputs = @("Channel=$Channel") + $inputs
+  }
+  $tpl = (@('<chart>', 'symbol=XAUUSD', 'period_type=1', 'period_size=1', 'mode=1', '',
+      '<expert>', "name=$($EA_NAME[$Expert])", "path=Experts\$($EA_NAME[$Expert]).ex5", "expertmode=$($EA_MODE[$Expert])", '<inputs>') +
+    $inputs + @('</inputs>', '</expert>', '', '<window>', 'height=100', '', '<indicator>', 'name=Main', 'path=', 'apply=1', 'show_data=1',
+      '</indicator>', '</window>', '</chart>', '')) -join "`r`n"
+  if (Test-Path $tplFile) { Move-Item $tplFile $tplBackup -Force }
+  $swapped = $true
+  [IO.File]::WriteAllText($tplFile, $tpl, [Text.Encoding]::Unicode)
+
+  # 3. chart: a new XAUUSD chart, which MT5 builds from default.tpl.
   $step = 'chart'
   $before = Frames $mdi
   [void]$W::PostMessage($main, 0x0111, [IntPtr][int]$chartId, $Z)
   $t0 = Get-Date
-  do { Start-Sleep -Milliseconds 300; $newChart = @(Frames $mdi | Where-Object { $before -notcontains $_ }) | Select-Object -First 1 }
+  # Frames returns its list as one pipeline object, so assign it before filtering.
+  do { Start-Sleep -Milliseconds 300; $now = Frames $mdi; $newChart = $now | Where-Object { $before -notcontains $_ } | Select-Object -First 1 }
   while (!$newChart -and ((Get-Date) - $t0).TotalSeconds -lt 5)
   if (!$newChart) { $newChart = $Z; throw 'new chart did not open' }
-  [void]$W::SendMessage($mdi, 0x0222, $newChart, $Z)  # WM_MDIACTIVATE
-  Start-Sleep -Milliseconds 500
+  Start-Sleep 3  # let the EA start
+  Restore-DefaultTemplate
+  $extra = New-Dialog $p.Id (Dialogs $p.Id) 1
+  if ($extra -ne $Z) { throw "unexpected dialog after opening the chart: '$(T $extra)'" }
 
-  # 3. insert: the EA's properties dialog on the new chart.
-  $step = 'insert'
-  $before = Dialogs $p.Id
-  [void]$W::PostMessage($main, 0x0111, [IntPtr][int]$eaId, $Z)
-  $props = New-Dialog $p.Id $before 5
-  if ($props -eq $Z) { throw 'EA properties did not open' }
-  $want = if ($Expert -eq 'exporter') { 'TradeExporter' } else { 'TradeCopy Sender' }
-  if ((T $props) -notmatch $want) { throw "unexpected dialog '$(T $props)'" }
-
-  # 4. sender only: load settings with the channel set.
-  if ($Expert -eq 'sender') {
-    $step = 'set-inputs'
-    $saved = Join-Path $workDir "$stamp-defaults.set"; $loadFile = Join-Path $workDir "$stamp-load.set"
-    $btn = ByName $props 'Save'; if ($btn -eq $Z) { $btn = $W::GetDlgItem($props, 4014) }
-    if ($btn -eq $Z) { throw 'Save button not found' }
-    $before = Dialogs $p.Id; Click $btn
-    $d = New-Dialog $p.Id $before 5; if ($d -eq $Z) { throw 'Save dialog did not open' }
-    if (!(Fill-FileDialog $d $saved)) { Cancel-Dialog $d; throw 'Save file name box not found' }
-    $t0 = Get-Date; while (!(Test-Path $saved) -and ((Get-Date) - $t0).TotalSeconds -lt 5) { Start-Sleep -Milliseconds 200 }
-    if ($W::IsWindow($d)) { Cancel-Dialog $d }
-    if (!(Test-Path $saved)) { throw 'settings file was not saved' }
-    $base = if ($BaseSet -and (Test-Path $BaseSet)) { $BaseSet } else { $saved }
-    $text = [IO.File]::ReadAllText($base)
-    if ($text -notmatch '(?m)^Channel=') { throw 'No input Channel' }
-    $text = [regex]::Replace($text, '(?m)^(Channel=)[^\r\n|]*', { param($m) $m.Groups[1].Value + $Channel }.GetNewClosure())
-    [IO.File]::WriteAllText($loadFile, $text, (Enc $base))
-
-    $loadBtn = ByName $props 'Load'; if ($loadBtn -eq $Z) { throw 'Load button not found' }
-    $before = Dialogs $p.Id; Click $loadBtn
-    $d = New-Dialog $p.Id $before 5; if ($d -eq $Z) { throw 'Open dialog did not open' }
-    if (!(Fill-FileDialog $d $loadFile)) { Cancel-Dialog $d; throw 'Open file name box not found' }
-    $t0 = Get-Date; while ($W::IsWindow($d) -and ((Get-Date) - $t0).TotalSeconds -lt 5) { Start-Sleep -Milliseconds 100 }
-    if ($W::IsWindow($d)) { throw 'Open dialog did not close' }
-    Start-Sleep -Milliseconds 800
-  }
-
-  # 5. ok
-  $step = 'ok'
-  Click ($W::GetDlgItem($props, 1))
-  $t0 = Get-Date; while ($W::IsWindow($props) -and ((Get-Date) - $t0).TotalSeconds -lt 5) { Start-Sleep -Milliseconds 100 }
-  if ($W::IsWindow($props)) { throw 'properties did not close after OK' }
-  $props = $Z; $attached = $true
-  Start-Sleep 2
-
-  # 6. verify: exactly one more EA.
+  # 4. verify: exactly one more EA.
   $step = 'verify'
   $count1 = Expert-Count $p
+  if ($count1 -gt $count0) { $attached = $true }
   if ($count1 -ne $count0 + 1) { throw "Expert List has $count1 EAs, expected $($count0 + 1)" }
 
-  # 7. persist
+  # 5. persist
   $step = 'persist'
   $saveId = Find-Leaf (Sub-Menu $menu 'File/Profiles') 'Save'
   if ($null -eq $saveId) { throw 'attached, but File/Profiles/Save was not found (lost on restart)' }
@@ -230,8 +264,10 @@ try {
   $res.error = $_.Exception.Message
 } finally {
   foreach ($h in $opened) { Cancel-Dialog $h }
+  Restore-DefaultTemplate
   # A chart this run opened that never got its EA is closed again.
   if (!$attached -and $newChart -ne $Z -and $W::IsWindow($newChart)) { [void]$W::SendMessage($mdi, 0x0221, $newChart, $Z) }  # WM_MDIDESTROY
+  Reminimize
   Get-ChildItem $workDir -Filter '*.set' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
   [IO.File]::WriteAllText($OutFile, ($res | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
 }
