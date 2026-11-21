@@ -260,13 +260,13 @@ class TradeWatcherApp {
   }
 
   /**
-   * Copier management: 3 minutes after start (e.g. after a reboot), then daily, scan the
+   * Copier management: 10 minutes after start (after the delayed terminal launcher settles), then daily, scan the
    * running MT4/MT5 terminals' copier settings and post them. Started once per process;
    * re-registration reuses it, since each run reads the current API client and label.
    */
   private startCopierScans(): void {
     if (this.stopCopierSchedule || process.platform !== 'win32') return;
-    this.stopCopierSchedule = startCopierSchedule(() => this.copierScan());
+    this.stopCopierSchedule = startCopierSchedule(() => this.copierScan(), 600_000);
     this.logger.info('Copier scan scheduled');
     this.startCommandPoller();
   }
