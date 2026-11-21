@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { countOpenRows, dispatch, goldClosed, openPositionsIn, startCommandPoller, type DispatchDeps, type SetLotResult, type WatcherCommand } from './copierCommands';
+import { countOpenRows, dispatch, goldClosed, openPositionsIn, setLotFromInput, startCommandPoller, type DispatchDeps, type SetLotResult, type WatcherCommand } from './copierCommands';
 
 const cmd = (p: Partial<WatcherCommand> = {}): WatcherCommand => ({
   id: 'c1', watcherId: 'w1', type: 'setReceiverLot', status: 'claimed',
@@ -132,4 +132,15 @@ test('goldClosed covers Fri 22:00 to Sun 22:00 UTC only', () => {
   assert.equal(goldClosed(Date.parse('2026-11-22T21:59:00Z')), true);
   assert.equal(goldClosed(Date.parse('2026-11-22T22:00:00Z')), false);
   assert.equal(goldClosed(Date.parse('2026-11-18T12:00:00Z')), false);
+});
+
+test('setLotFromInput maps the set-input result to old and new lot', () => {
+  assert.deepEqual(
+    setLotFromInput({ ok: true, before: { UseFixedLotSize: '0.23' }, after: { UseFixedLotSize: '0.24' }, chartFile: 'chart06.chr', step: null, error: null }),
+    { ok: true, oldLot: 0.23, newLot: 0.24, chartFile: 'chart06.chr', step: null, error: null },
+  );
+  assert.deepEqual(
+    setLotFromInput({ ok: false, before: null, after: null, chartFile: null, step: 'find', error: 'no receiver with channel FN2' }),
+    { ok: false, oldLot: null, newLot: null, chartFile: null, step: 'find', error: 'no receiver with channel FN2' },
+  );
 });

@@ -10,7 +10,7 @@ import { ApiClient } from './apiClient';
 import { Logger, LogLevel } from './logger';
 import { SymbolMap } from './symbolNormaliser';
 import { runCopierScan, startCopierSchedule } from './copierScanner';
-import { dispatch, openPositionsIn, runSetLotScript, startCommandPoller } from './copierCommands';
+import { dispatch, openPositionsIn, runSetInputScript, setLotFromInput, startCommandPoller } from './copierCommands';
 
 // Resolves the platform-appropriate default watch folder. The MT4/MT5 EAs
 // write to the terminal common folder (FILE_COMMON), which on Windows is
@@ -306,7 +306,8 @@ class TradeWatcherApp {
         this.logger.info(`Command ${cmd.id} ${cmd.type} started`);
         await dispatch(cmd, {
           openPositions: async login => openPositionsIn(this.store.get('watchFolders') as string[], login),
-          runSetLot: (channel, lot) => this.copierExclusive(() => runSetLotScript(this.copierScript('copier-set-lot.ps1'), channel, lot)),
+          runSetLot: (channel, lot) => this.copierExclusive(() => runSetInputScript(this.copierScript('copier-set-input.ps1'),
+            { role: 'receiver', channel, set: { UseFixedLotSize: lot.toFixed(2) } }).then(setLotFromInput)),
           rescan: () => this.copierScan(),
           postResult: async (id, body) => {
             this.logger.info(`Command ${id} ${cmd.type} ${body.status}${body.error ? `: ${body.error}` : ''} in ${Date.now() - t0}ms`);

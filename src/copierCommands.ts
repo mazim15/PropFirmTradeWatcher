@@ -18,7 +18,13 @@ export type WatcherCommand = {
   createdAt: string; claimedAt: string | null; finishedAt: string | null;
   result: { oldLot?: number; newLot?: number } | null; error: string | null;
 };
-/** What scripts/copier-set-lot.ps1 writes. */
+/** What scripts/copier-set-input.ps1 writes: the -Set keys' values before and on read-back. */
+export type SetInputResult = {
+  ok: boolean; before: Record<string, string> | null; after: Record<string, string> | null;
+  chartFile: string | null; step: string | null; error: string | null;
+};
+export type SetInputArgs = { role: 'receiver' | 'sender'; channel?: string; login?: string; set: Record<string, string> };
+/** A receiver lot change's outcome. */
 export type SetLotResult = {
   ok: boolean; oldLot: number | null; newLot: number | null; chartFile: string | null;
   step: string | null; error: string | null;
@@ -129,21 +135,38 @@ export function openPositionsIn(folders: string[], login: string, nowMs = Date.n
   try { return countOpenRows(fs.readFileSync(newest.file, 'utf8')); } catch { return null; }
 }
 
-/** Runs the bundled copier-set-lot script. */
-export async function runSetLotScript(scriptPath: string, channel: string, lot: number): Promise<SetLotResult> {
-  const outFile = path.join(os.tmpdir(), `copier-set-lot-${process.pid}-${Date.now()}.json`);
+const lotOf = (m: Record<string, string> | null): number | null => {
+  const n = Number(m?.UseFixedLotSize);
+  return m?.UseFixedLotSize !== undefined && m.UseFixedLotSize !== '' && Number.isFinite(n) ? n : null;
+};
+
+/** A set-input run on UseFixedLotSize, as a lot change's result. */
+export function setLotFromInput(r: SetInputResult): SetLotResult {
+  return { ok: r.ok, oldLot: lotOf(r.before), newLot: lotOf(r.after), chartFile: r.chartFile, step: r.step, error: r.error };
+}
+
+/** Runs a bundled PowerShell script with `-OutFile <tmp>` appended and returns the JSON it wrote. */
+export async function runPsScript<T>(scriptPath: string, args: string[], timeoutMs: number): Promise<T> {
+  const outFile = path.join(os.tmpdir(), `${path.basename(scriptPath, '.ps1')}-${process.pid}-${Date.now()}.json`);
   try {
     await new Promise<void>((resolve, reject) => {
       execFile(
         'powershell.exe',
         ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath,
-          '-Channel', channel, '-Lot', lot.toFixed(2), '-OutFile', outFile],
-        { timeout: SET_LOT_TIMEOUT_MS, windowsHide: true },
+          ...args, '-OutFile', outFile],
+        { timeout: timeoutMs, windowsHide: true },
         (err, _stdout, stderr) => (err ? reject(new Error(`${err.message}${stderr ? `: ${stderr.trim()}` : ''}`)) : resolve()),
       );
     });
-    return JSON.parse(fs.readFileSync(outFile, 'utf8').replace(/^﻿/, '')) as SetLotResult;
+    return JSON.parse(fs.readFileSync(outFile, 'utf8').replace(/^\uFEFF/, '')) as T;
   } finally {
     fs.rmSync(outFile, { force: true });
   }
+}
+
+/** Runs the bundled copier-set-input script on one receiver or sender. */
+export function runSetInputScript(scriptPath: string, a: SetInputArgs): Promise<SetInputResult> {
+  const target = a.role === 'receiver' ? ['-Channel', a.channel ?? ''] : ['-Login', a.login ?? ''];
+  const set = Object.entries(a.set).map(([k, v]) => `${k}=${v}`).join(';');
+  return runPsScript<SetInputResult>(scriptPath, ['-Role', a.role, ...target, '-Set', set], SET_LOT_TIMEOUT_MS);
 }
