@@ -55,7 +55,8 @@ async function run(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBody>
 /**
  * Runs one command and posts its outcome. Never retries; a throw becomes `failed`.
  * After a lot change attempt, whatever the outcome, it rescans so the board shows the
- * real lot. The result is posted first: a scan can take minutes.
+ * real lot. The result is posted first and the rescan isn't awaited: a scan can take
+ * minutes, and the poller must stay free to claim the next command before it expires.
  */
 export async function dispatch(cmd: WatcherCommand, deps: DispatchDeps): Promise<void> {
   let body: ResultBody;
@@ -65,7 +66,7 @@ export async function dispatch(cmd: WatcherCommand, deps: DispatchDeps): Promise
     body = { status: 'failed', error: error instanceof Error ? error.message : String(error) };
   }
   await deps.postResult(cmd.id, body);
-  if (cmd.type === 'setReceiverLot') await deps.rescan().catch(() => undefined);
+  if (cmd.type === 'setReceiverLot') void deps.rescan().catch(() => undefined);
 }
 
 /** Polls every `everyMs`; runs the returned commands one at a time, oldest first, and skips a tick while busy. */

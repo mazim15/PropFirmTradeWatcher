@@ -91,3 +91,13 @@ test('countOpenRows counts data rows after the header', () => {
   assert.equal(countOpenRows(head + '123,2026.11.21,buy,0.1,XAUUSD,1,0,0,1,0,0,0,,Open,0\n\n'), 1);
   assert.equal(countOpenRows('garbage'), null);
 });
+
+test('set lot does not wait for the follow-up rescan, so the poller can claim the next command', async () => {
+  const { deps, calls } = fakes();
+  let finishScan: () => void = () => undefined;
+  deps.rescan = () => { calls.rescan++; return new Promise<void>(r => { finishScan = r; }); };
+  await dispatch(cmd(), deps); // would hang if it awaited the scan
+  assert.equal(calls.rescan, 1);
+  assert.equal(calls.posted[0].body.status, 'done');
+  finishScan();
+});
