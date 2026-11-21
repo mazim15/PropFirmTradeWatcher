@@ -69,7 +69,14 @@ async function renameChannel(cmd: WatcherCommand, deps: DispatchDeps): Promise<R
   if (!propLogin || !brokerLogin || !oldChannel || !newChannel) return BAD_PAYLOAD;
   if (!(await flat(deps, propLogin, brokerLogin))) return OPEN_TRADE;
   const recv = await deps.runSetInput({ role: 'receiver', channel: oldChannel, set: { Channel: newChannel } });
-  if (!recv.ok) return { status: 'failed', error: `receiver: ${why(recv)}` };
+  if (!recv.ok) {
+    // It failed after OK (read-back or persist) and the new name is live: put the old one back.
+    const live = recv.after?.Channel;
+    if (!live || live === oldChannel) return { status: 'failed', error: `receiver: ${why(recv)}` };
+    const undo = await deps.runSetInput({ role: 'receiver', channel: live, set: { Channel: oldChannel } });
+    if (undo.ok) return { status: 'failed', error: `receiver: ${why(recv)} (receiver restored)` };
+    return { status: 'failed', error: `MISMATCH: receiver ${live}, sender ${oldChannel}` };
+  }
   const send = await deps.runSetInput({ role: 'sender', login: propLogin, set: { Channel: newChannel } });
   if (send.ok) return { status: 'done', result: { before: { Channel: oldChannel }, after: { Channel: newChannel } } };
   const back = await deps.runSetInput({ role: 'receiver', channel: newChannel, set: { Channel: oldChannel } });

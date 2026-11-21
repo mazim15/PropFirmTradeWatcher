@@ -291,9 +291,11 @@ try {
   # 6. persist: survive a restart.
   $step = 'persist'
   if ($Role -eq 'receiver') {
+    # MT4 often rewrites the chart file itself on OK, so on a rename it may already hold the new name.
+    $names = @($Channel); if ($want.Contains('Channel')) { $names += $want['Channel'] }
     $dir = Join-Path (Data-Folder (Split-Path $p.Path -Parent)) 'profiles\default'
     $chr = Get-ChildItem (Join-Path $dir 'chart*.chr') -ErrorAction SilentlyContinue |
-      Where-Object { (Val ([IO.File]::ReadAllText($_.FullName)) 'Channel') -ceq $Channel } | Select-Object -First 1
+      Where-Object { $names -ccontains (Val ([IO.File]::ReadAllText($_.FullName)) 'Channel') } | Select-Object -First 1
     if (!$chr) { throw "change is live, but no chart file has channel $Channel (lost on restart)" }
     [IO.File]::WriteAllText($chr.FullName, (Apply ([IO.File]::ReadAllText($chr.FullName))), (Enc $chr.FullName))
     $res.chartFile = $chr.Name

@@ -242,3 +242,22 @@ test('point sender sets the sender channel; invert on sets the receiver', async 
   assert.equal(b.calls.posted[0].body.status, 'done');
   assert.equal(b.calls.rescan, 1);
 });
+
+test('rename restores the receiver when its own step fails after the change went live', async () => {
+  const live: SetInputResult = { ok: false, before: { Channel: 'FN2' }, after: { Channel: 'FN2T' }, chartFile: null, step: 'persist', error: 'no chart file' };
+  const { deps, calls } = fakes({ setInput: [live] });
+  await dispatch(rename(), deps);
+  assert.deepEqual(calls.setInput, [
+    { role: 'receiver', channel: 'FN2', set: { Channel: 'FN2T' } },
+    { role: 'receiver', channel: 'FN2T', set: { Channel: 'FN2' } },
+  ]);
+  assert.equal(calls.posted[0].body.error, 'receiver: persist: no chart file (receiver restored)');
+  assert.equal(calls.rescan, 1);
+});
+
+test('rename reports a mismatch when a live receiver change cannot be restored', async () => {
+  const live: SetInputResult = { ok: false, before: { Channel: 'FN2' }, after: { Channel: 'FN2T' }, chartFile: null, step: 'persist', error: 'x' };
+  const { deps, calls } = fakes({ setInput: [live, failInput('find', 'y')] });
+  await dispatch(rename(), deps);
+  assert.equal(calls.posted[0].body.error, 'MISMATCH: receiver FN2T, sender FN2');
+});
