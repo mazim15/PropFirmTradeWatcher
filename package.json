@@ -1,6 +1,6 @@
 {
   "name": "propfirm-trade-watcher",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Automated file watcher for PropFirm trade imports",
   "main": "dist/main.js",
   "scripts": {
