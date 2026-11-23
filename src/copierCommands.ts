@@ -17,7 +17,9 @@ export type WatcherCommand = {
   id: string; watcherId: string; type: CommandType; status: CommandStatus;
   payload: { accountNumber?: string; channel?: string; lot?: number;
              propLogin?: string; brokerLogin?: string;
-             oldChannel?: string; newChannel?: string; action?: RepairAction };
+             oldChannel?: string; newChannel?: string; action?: RepairAction;
+             /** Open broker tickets copied from other accounts; they don't block this change. */
+             otherTickets?: string[] };
   createdAt: string; claimedAt: string | null; finishedAt: string | null;
   result: { oldLot?: number; newLot?: number; before?: Record<string, string>; after?: Record<string, string> } | null;
   error: string | null;
@@ -38,7 +40,8 @@ export type AttachResult = { ok: boolean; step: string | null; error: string | n
 export type AttachArgs = { login: string; ea: 'exporter' | 'sender'; channel?: string; baseSet?: string };
 export type ResultBody = { status: 'done' | 'failed'; result?: object; error?: string };
 export type DispatchDeps = {
-  openPositions(login: string): Promise<number | null>;
+  /** Open positions on a login, not counting the `ignore` tickets; null if unknown. */
+  openPositions(login: string, ignore?: string[]): Promise<number | null>;
   runSetLot(channel: string, lot: number): Promise<SetLotResult>;
   runSetInput(args: SetInputArgs): Promise<SetInputResult>;
   runAttach(args: AttachArgs): Promise<AttachResult>;
@@ -57,9 +60,12 @@ const BAD_PAYLOAD: ResultBody = { status: 'failed', error: 'Bad command payload'
 const OPEN_TRADE: ResultBody = { status: 'failed', error: 'Open trade or no fresh trade data' };
 const why = (r: { step: string | null; error: string | null }) => `${r.step ?? 'unknown'}: ${r.error ?? 'failed'}`;
 
-/** Re-check just before touching MT4/MT5: the server's check may be seconds old. */
-async function flat(deps: DispatchDeps, propLogin: string, brokerLogin: string): Promise<boolean> {
-  const [prop, broker] = await Promise.all([deps.openPositions(propLogin), deps.openPositions(brokerLogin)]);
+/**
+ * Re-check just before touching MT4/MT5: the server's check may be seconds old. Only the broker tickets
+ * the server proved belong to other accounts are ignored, so a trade opened since then still refuses.
+ */
+async function flat(deps: DispatchDeps, propLogin: string, brokerLogin: string, otherTickets?: string[]): Promise<boolean> {
+  const [prop, broker] = await Promise.all([deps.openPositions(propLogin), deps.openPositions(brokerLogin, otherTickets)]);
   return prop === 0 && broker === 0;
 }
 
@@ -67,7 +73,7 @@ async function flat(deps: DispatchDeps, propLogin: string, brokerLogin: string):
 async function renameChannel(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBody> {
   const { propLogin, brokerLogin, oldChannel, newChannel } = cmd.payload;
   if (!propLogin || !brokerLogin || !oldChannel || !newChannel) return BAD_PAYLOAD;
-  if (!(await flat(deps, propLogin, brokerLogin))) return OPEN_TRADE;
+  if (!(await flat(deps, propLogin, brokerLogin, cmd.payload.otherTickets))) return OPEN_TRADE;
   const recv = await deps.runSetInput({ role: 'receiver', channel: oldChannel, set: { Channel: newChannel } });
   if (!recv.ok) {
     // It failed after OK (read-back or persist) and the new name is live: put the old one back.
@@ -95,7 +101,8 @@ async function repair(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBo
   if (!brokerLogin) return BAD_PAYLOAD;
   const needs = action === 'invertOn' ? channel : newChannel;
   if (!needs || (action !== 'attachSender' && action !== 'pointSender' && action !== 'invertOn')) return BAD_PAYLOAD;
-  if (!(await flat(deps, propLogin, brokerLogin))) return OPEN_TRADE;
+  // Pointing or attaching a sender takes over a receiver that may hold another account's trade.
+  if (!(await flat(deps, propLogin, brokerLogin, action === 'invertOn' ? cmd.payload.otherTickets : undefined))) return OPEN_TRADE;
   if (action === 'attachSender') {
     const r = await deps.runAttach({ login: propLogin, ea: 'sender', channel: needs, baseSet: deps.keptSenderSet(propLogin) ?? undefined });
     return r.ok ? { status: 'done' } : { status: 'failed', error: why(r) };
@@ -118,7 +125,7 @@ async function run(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBody>
   if (cmd.type !== 'setReceiverLot') return { status: 'failed', error: 'Unknown command' };
   const { propLogin, brokerLogin, channel, lot } = cmd.payload;
   if (!propLogin || !brokerLogin || !channel || typeof lot !== 'number') return BAD_PAYLOAD;
-  if (!(await flat(deps, propLogin, brokerLogin))) return OPEN_TRADE;
+  if (!(await flat(deps, propLogin, brokerLogin, cmd.payload.otherTickets))) return OPEN_TRADE;
   const r = await deps.runSetLot(channel, lot);
   if (r.ok) return { status: 'done', result: { oldLot: r.oldLot ?? undefined, newLot: r.newLot ?? undefined } };
   return { status: 'failed', error: why(r) };
@@ -164,12 +171,12 @@ export function startCommandPoller(
   return () => clearInterval(interval);
 }
 
-/** Data rows after the exporter's `Ticket,…` header; null when there is no header. */
-export function countOpenRows(text: string): number | null {
+/** Data rows after the exporter's `Ticket,…` header, skipping `ignore` tickets; null when there is no header. */
+export function countOpenRows(text: string, ignore: string[] = []): number | null {
   const lines = text.replace(/^﻿/, '').split(/\r?\n/);
   const h = lines.findIndex(l => l.startsWith('Ticket'));
   if (h < 0) return null;
-  return lines.slice(h + 1).filter(l => l.trim() && !l.startsWith('#')).length;
+  return lines.slice(h + 1).filter(l => l.trim() && !l.startsWith('#') && !ignore.includes(l.split(/[,;\t]/)[0].trim())).length;
 }
 
 /**
@@ -188,7 +195,7 @@ export function goldClosed(nowMs: number): boolean {
  * The exporter's timer runs on server time, which stops between ticks, so while gold is closed its last
  * file (from the close) is used as long as it's under 72h old. While open, it must be under 5 minutes old.
  */
-export function openPositionsIn(folders: string[], login: string, nowMs = Date.now()): number | null {
+export function openPositionsIn(folders: string[], login: string, nowMs = Date.now(), ignore: string[] = []): number | null {
   let newest: { file: string; mtime: number } | null = null;
   for (const folder of folders) {
     const file = path.join(folder, `open_trades_${login.trim()}_latest.csv`);
@@ -199,7 +206,7 @@ export function openPositionsIn(folders: string[], login: string, nowMs = Date.n
   }
   const maxAge = goldClosed(nowMs) ? CLOSED_MAX_AGE_MS : FRESH_TRADES_MS;
   if (!newest || nowMs - newest.mtime > maxAge) return null;
-  try { return countOpenRows(fs.readFileSync(newest.file, 'utf8')); } catch { return null; }
+  try { return countOpenRows(fs.readFileSync(newest.file, 'utf8'), ignore); } catch { return null; }
 }
 
 const lotOf = (m: Record<string, string> | null): number | null => {

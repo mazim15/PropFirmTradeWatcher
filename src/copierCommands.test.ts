@@ -261,3 +261,32 @@ test('rename reports a mismatch when a live receiver change cannot be restored',
   await dispatch(rename(), deps);
   assert.equal(calls.posted[0].body.error, 'MISMATCH: receiver FN2T, sender FN2');
 });
+
+test('countOpenRows skips only the tickets the server proved belong to other accounts', () => {
+  const csv = 'Ticket;OpenTime;Type;Size\n900001;x;buy;0.06\n900002;x;sell;0.23\n';
+  assert.equal(countOpenRows(csv), 2);
+  assert.equal(countOpenRows(csv, ['900001']), 1);
+  assert.equal(countOpenRows(csv, ['900001', '900002']), 0);
+  assert.equal(countOpenRows(csv, ['90000']), 2);
+  assert.equal(countOpenRows(csv.replace(/;/g, '\t'), ['900001', '900002']), 0); // older exporters use tabs
+});
+
+const asked = (type: WatcherCommand['type'], payload: WatcherCommand['payload']) => {
+  const { deps, calls } = fakes();
+  const seen: Record<string, string[] | undefined> = {};
+  deps.openPositions = async (login, ignore) => { seen[login] = ignore; return 0; };
+  return { seen, calls, done: dispatch(cmd({ type, payload }), deps) };
+};
+
+test('set lot ignores other accounts broker tickets, on the broker login only', async () => {
+  const { seen, calls, done } = asked('setReceiverLot', { ...cmd().payload, otherTickets: ['9'] });
+  await done;
+  assert.deepEqual(seen, { '12150589': undefined, '13003534': ['9'] });
+  assert.equal(calls.setLot, 1);
+});
+
+test('point sender still needs the whole broker login flat', async () => {
+  const { seen, done } = asked('repair', { action: 'pointSender', propLogin: '12150589', brokerLogin: '13003534', newChannel: 'A', otherTickets: ['9'] });
+  await done;
+  assert.equal(seen['13003534'], undefined);
+});

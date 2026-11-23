@@ -305,7 +305,7 @@ class TradeWatcherApp {
         const t0 = Date.now();
         this.logger.info(`Command ${cmd.id} ${cmd.type} started`);
         await dispatch(cmd, {
-          openPositions: async login => openPositionsIn(this.store.get('watchFolders') as string[], login),
+          openPositions: async (login, ignore) => openPositionsIn(this.store.get('watchFolders') as string[], login, Date.now(), ignore),
           runSetLot: (channel, lot) => this.copierExclusive(() => runSetInputScript(this.copierScript('copier-set-input.ps1'),
             { role: 'receiver', channel, set: { UseFixedLotSize: lot.toFixed(2) } }).then(setLotFromInput)),
           runSetInput: args => this.copierExclusive(() => runSetInputScript(this.copierScript('copier-set-input.ps1'), args)),
