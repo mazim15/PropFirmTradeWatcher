@@ -28,13 +28,4 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 Copy-Item (Join-Path $PSScriptRoot 'start-terminals.ps1') $dest -Force
 Copy-Item (Join-Path $PSScriptRoot 'start-terminals.cmd') $startup -Force
 
-$shell = New-Object -ComObject WScript.Shell
-$moved = 0
-foreach ($lnk in Get-ChildItem -Path $startup -Filter '*.lnk') {
-  $target = $shell.CreateShortcut($lnk.FullName).TargetPath
-  if ($target -notmatch '\\terminal(64)?\.exe$') { continue }
-  Move-Item -LiteralPath $lnk.FullName -Destination (Join-Path $dest $lnk.Name) -Force
-  Add-Content -Path $movedFile -Value $lnk.Name
-  $moved++
-}
-Write-Output "$moved moved"
+& (Join-Path $dest 'start-terminals.ps1') -MoveOnly
