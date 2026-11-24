@@ -40,8 +40,8 @@ export type AttachResult = { ok: boolean; step: string | null; error: string | n
 export type AttachArgs = { login: string; ea: 'exporter' | 'sender'; channel?: string; baseSet?: string };
 export type ResultBody = { status: 'done' | 'failed'; result?: object; error?: string };
 export type DispatchDeps = {
-  /** Open positions on a login, not counting the `ignore` tickets; null if unknown. */
-  openPositions(login: string, ignore?: string[]): Promise<number | null>;
+  /** Open positions on a login, not counting the `ignore` tickets, from a file no older than `since`; null if unknown. */
+  openPositions(login: string, ignore?: string[], since?: number): Promise<number | null>;
   runSetLot(channel: string, lot: number): Promise<SetLotResult>;
   runSetInput(args: SetInputArgs): Promise<SetInputResult>;
   runAttach(args: AttachArgs): Promise<AttachResult>;
@@ -67,8 +67,8 @@ const why = (r: { step: string | null; error: string | null }) => `${r.step ?? '
  * Re-check just before touching MT4/MT5: the server's check may be seconds old. Only the broker tickets
  * the server proved belong to other accounts are ignored, so a trade opened since then still refuses.
  */
-async function flat(deps: DispatchDeps, propLogin: string, brokerLogin: string, otherTickets?: string[]): Promise<boolean> {
-  const [prop, broker] = await Promise.all([deps.openPositions(propLogin), deps.openPositions(brokerLogin, otherTickets)]);
+async function flat(deps: DispatchDeps, propLogin: string, brokerLogin: string, otherTickets?: string[], propSince?: number): Promise<boolean> {
+  const [prop, broker] = await Promise.all([deps.openPositions(propLogin, undefined, propSince), deps.openPositions(brokerLogin, otherTickets)]);
   return prop === 0 && broker === 0;
 }
 
@@ -109,14 +109,16 @@ async function repair(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBo
   if (attaching && !baseSet) return { status: 'failed', error: 'No saved sender settings on this PC' };
   // The flat check needs the exporter's file, so the exporter goes first and its first file is awaited.
   const said = action === 'attachBoth' ? 'exporter attached; sender: ' : '';
+  let since: number | undefined; // a file from before the exporter went missing can't show a trade opened since
   if (action === 'attachBoth') {
+    since = Date.now();
     const r = await deps.runAttach({ login: propLogin, ea: 'exporter' });
     if (!r.ok) return { status: 'failed', error: `exporter: ${why(r)}` };
-    for (let i = 0; i < 18 && (await deps.openPositions(propLogin)) === null; i++) await deps.wait(5000);
+    for (let i = 0; i < 18 && (await deps.openPositions(propLogin, undefined, since)) === null; i++) await deps.wait(5000);
   }
   // Pointing a sender takes over a receiver that may hold another account's trade, so nothing is ignored there.
   // For an attach the server sends tickets to ignore only when it is the account's own last channel.
-  if (!(await flat(deps, propLogin, brokerLogin, action === 'pointSender' ? undefined : cmd.payload.otherTickets))) {
+  if (!(await flat(deps, propLogin, brokerLogin, action === 'pointSender' ? undefined : cmd.payload.otherTickets, since))) {
     return { ...OPEN_TRADE, error: said + OPEN_TRADE.error };
   }
   if (attaching) {
@@ -217,7 +219,7 @@ export function goldClosed(nowMs: number): boolean {
  * The exporter's timer runs on server time, which stops between ticks, so while gold is closed its last
  * file (from the close) is used as long as it's under 72h old. While open, it must be under 5 minutes old.
  */
-export function openPositionsIn(folders: string[], login: string, nowMs = Date.now(), ignore: string[] = []): number | null {
+export function openPositionsIn(folders: string[], login: string, nowMs = Date.now(), ignore: string[] = [], since = 0): number | null {
   let newest: { file: string; mtime: number } | null = null;
   for (const folder of folders) {
     const file = path.join(folder, `open_trades_${login.trim()}_latest.csv`);
@@ -227,7 +229,7 @@ export function openPositionsIn(folders: string[], login: string, nowMs = Date.n
     } catch { /* not in this folder */ }
   }
   const maxAge = goldClosed(nowMs) ? CLOSED_MAX_AGE_MS : FRESH_TRADES_MS;
-  if (!newest || nowMs - newest.mtime > maxAge) return null;
+  if (!newest || newest.mtime < since || nowMs - newest.mtime > maxAge) return null;
   try { return countOpenRows(fs.readFileSync(newest.file, 'utf8'), ignore); } catch { return null; }
 }
 
