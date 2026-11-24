@@ -301,6 +301,8 @@ class TradeWatcherApp {
     return this.copierExclusive(async () => {
       try {
         const endpoints = await runCopierScan(this.copierScript('copier-scan.ps1'), this.watcherId, this.machineLabel());
+        // Which terminals run, from the same moment: else the board shows the minute-old list beside this scan.
+        await this.postTerminals();
         const ok = await this.apiClient.postCopierScan(this.watcherId, endpoints);
         if (ok) this.logger.info(`Copier scan: ${endpoints.length} endpoints posted`);
         else this.logger.warn(`Copier scan: ${endpoints.length} endpoints found, post failed`);
@@ -343,7 +345,7 @@ class TradeWatcherApp {
           rescan: async () => {
             if (cmd.type !== 'openTerminal') return this.copierScan();
             if (this.openRescan) clearTimeout(this.openRescan);
-            this.openRescan = setTimeout(() => void this.copierScan(), 20_000);
+            this.openRescan = setTimeout(() => void this.copierScan(), 5_000);
           },
           postResult: async (id, body) => {
             this.logger.info(`Command ${id} ${cmd.type} ${body.status}${body.error ? `: ${body.error}` : ''} in ${Date.now() - t0}ms`);
