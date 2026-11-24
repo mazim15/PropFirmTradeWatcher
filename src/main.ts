@@ -10,6 +10,7 @@ import { ApiClient } from './apiClient';
 import { Logger, LogLevel } from './logger';
 import { SymbolMap } from './symbolNormaliser';
 import { runCopierScan, startCopierSchedule } from './copierScanner';
+import { openTerminal, runInventoryScript, runOpenScript } from './terminalInventory';
 import { dispatch, keptSenderSetPath, openPositionsIn, runAttachScript, runSetInputScript, setLotFromInput, startCommandPoller } from './copierCommands';
 
 // Resolves the platform-appropriate default watch folder. The MT4/MT5 EAs
@@ -268,6 +269,8 @@ class TradeWatcherApp {
     if (this.stopCopierSchedule || process.platform !== 'win32') return;
     this.stopCopierSchedule = startCopierSchedule(() => this.copierScan(), 600_000);
     this.logger.info('Copier scan scheduled');
+    // Not in the copier queue: it opens no window, and must keep reporting while a scan runs.
+    startCopierSchedule(() => this.postTerminals(), 15_000, 60_000);
     this.startCommandPoller();
   }
 
@@ -281,6 +284,15 @@ class TradeWatcherApp {
     const next = this.copierQueue.then(fn, fn);
     this.copierQueue = next.catch(() => undefined);
     return next;
+  }
+
+  private async postTerminals(): Promise<void> {
+    try {
+      const terminals = await runInventoryScript(this.copierScript('terminal-inventory.ps1'));
+      await this.apiClient.postTerminals(this.watcherId, this.machineLabel(), terminals);
+    } catch (error) {
+      this.logger.debug(`Terminal inventory failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private copierScan(): Promise<void> {
@@ -310,6 +322,11 @@ class TradeWatcherApp {
             { role: 'receiver', channel, set: { UseFixedLotSize: lot.toFixed(2) } }).then(setLotFromInput)),
           runSetInput: args => this.copierExclusive(() => runSetInputScript(this.copierScript('copier-set-input.ps1'), args)),
           runAttach: args => this.copierExclusive(() => runAttachScript(this.copierScript('copier-attach.ps1'), args)),
+          runOpenTerminal: login => this.copierExclusive(() => openTerminal(login, {
+            inventory: () => runInventoryScript(this.copierScript('terminal-inventory.ps1')),
+            start: (exe, l) => runOpenScript(this.copierScript('open-terminal.ps1'), exe, l),
+            post: () => this.postTerminals(),
+          })),
           keptSenderSet: login => keptSenderSetPath(login),
           rescan: () => this.copierScan(),
           postResult: async (id, body) => {
