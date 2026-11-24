@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
+import { trimLog } from './logTrim';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -22,6 +23,9 @@ export class Logger {
     // Ensure log directory exists
     fs.mkdirSync(path.dirname(this.logFile), { recursive: true });
     
+    this.rotateLogs();
+    setInterval(() => this.rotateLogs(), 10 * 60 * 1000);
+
     // Initialize with startup message
     this.info('Logger initialized');
   }
@@ -113,25 +117,12 @@ export class Logger {
     this.recentLogs = [];
   }
 
-  public async rotateLogs(): Promise<void> {
+  /** Keeps the log file under its size limit. */
+  public rotateLogs(): void {
     try {
-      // Check file size (rotate if > 10MB)
-      const stats = await fs.promises.stat(this.logFile);
-      if (stats.size > 10 * 1024 * 1024) {
-        const rotatedFile = this.logFile + '.old';
-        
-        // Remove old rotated file if exists
-        if (fs.existsSync(rotatedFile)) {
-          await fs.promises.unlink(rotatedFile);
-        }
-        
-        // Rename current log to .old
-        await fs.promises.rename(this.logFile, rotatedFile);
-        
-        this.info('Log file rotated');
-      }
+      if (trimLog(this.logFile)) this.info('Log file trimmed');
     } catch (error) {
-      console.error('Failed to rotate logs:', error);
+      console.error('Failed to trim log:', error);
     }
   }
 }
