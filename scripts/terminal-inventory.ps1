@@ -44,7 +44,8 @@ function Closed-Login($kind, $dataDir, $remembered) {
 
 $store = Join-Path $env:LOCALAPPDATA 'copier\terminal-logins.json'
 $known = @{}
-try { (Get-Content -LiteralPath $store -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $known[$_.Name] = [string]$_.Value } } catch { }
+$storeOk = $true
+try { if (Test-Path -LiteralPath $store) { (Get-Content -LiteralPath $store -Raw -Encoding UTF8 | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $known[$_.Name] = [string]$_.Value } } } catch { $storeOk = $false }  # never overwrite a store that couldn't be read
 $changed = $false
 
 # exe path (lower case) -> main window handle
@@ -69,6 +70,7 @@ foreach ($k in $running.Keys) {  # portable: data lives in the install folder
 $terminals = New-Object System.Collections.Generic.List[object]
 foreach ($d in $dirs) {
   foreach ($e in @(@('mt5', 'terminal64.exe'), @('mt4', 'terminal.exe'))) {
+    $isRunning = $false
     try {
       $exe = Join-Path $d.install $e[1]
       if (!(Test-Path -LiteralPath $exe)) { continue }
@@ -83,14 +85,16 @@ foreach ($d in $dirs) {
       $last = Logs $d.data 1
       $used = if ($last.Count) { $last[0].LastWriteTimeUtc.ToString('o') } else { '' }
       $terminals.Add([ordered]@{ kind = $e[0]; path = $exe; login = $login; running = $isRunning; lastUsed = $used })
-    } catch { }  # one bad folder never hides the others
+    } catch { if ($isRunning) { throw } }  # one bad closed folder never hides the others; a running one must not vanish
   }
 }
 
-if ($changed) {
+if ($changed -and $storeOk) {
   try {
     New-Item -ItemType Directory -Force (Split-Path $store -Parent) | Out-Null
-    [IO.File]::WriteAllText($store, ($known | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+    $tmp = "$store.$PID"  # two runs can overlap, so swap a whole file in
+    [IO.File]::WriteAllText($tmp, ($known | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+    Move-Item -LiteralPath $tmp -Destination $store -Force
   } catch { }
 }
 $json = [ordered]@{ terminals = $terminals.ToArray() } | ConvertTo-Json -Depth 4

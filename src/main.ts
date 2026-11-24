@@ -37,6 +37,8 @@ class TradeWatcherApp {
   private stopCopierSchedule: (() => void) | null = null;
   private stopCommandPoller: (() => void) | null = null;
   /** Scans and lot changes both drive MT4/MT5 dialogs, so they run one after another. */
+  private commandsReceivedAt = 0;
+  private openRescan: NodeJS.Timeout | null = null;
   private copierQueue: Promise<unknown> = Promise.resolve();
   private registrationRetryTimeout: NodeJS.Timeout | null = null;
   /** Drives the staleness alarm and the tray colour. */
@@ -312,9 +314,15 @@ class TradeWatcherApp {
   private startCommandPoller(): void {
     if (this.stopCommandPoller) return;
     this.stopCommandPoller = startCommandPoller(
-      () => this.apiClient.fetchCommands(this.watcherId),
+      async () => {
+        const cmds = await this.apiClient.fetchCommands(this.watcherId);
+        this.commandsReceivedAt = Date.now(); // this PC's clock; the next fetch waits for the whole batch
+        return cmds;
+      },
       async cmd => {
         const t0 = Date.now();
+        const receivedAt = this.commandsReceivedAt;
+        if (cmd.type === 'openTerminal' && this.openRescan) clearTimeout(this.openRescan);
         this.logger.info(`Command ${cmd.id} ${cmd.type} started`);
         await dispatch(cmd, {
           openPositions: async (login, ignore) => openPositionsIn(this.store.get('watchFolders') as string[], login, Date.now(), ignore),
@@ -326,9 +334,16 @@ class TradeWatcherApp {
             inventory: () => runInventoryScript(this.copierScript('terminal-inventory.ps1')),
             start: (exe, l) => runOpenScript(this.copierScript('open-terminal.ps1'), exe, l),
             post: () => this.postTerminals(),
+            expired: () => Date.now() - receivedAt > 90_000,
           })),
           keptSenderSet: login => keptSenderSetPath(login),
-          rescan: () => this.copierScan(),
+          // After an open, scan once things settle: the terminal is still loading its EAs, and a scan
+          // (minutes) queued now would hold up the next terminal being opened.
+          rescan: async () => {
+            if (cmd.type !== 'openTerminal') return this.copierScan();
+            if (this.openRescan) clearTimeout(this.openRescan);
+            this.openRescan = setTimeout(() => void this.copierScan(), 20_000);
+          },
           postResult: async (id, body) => {
             this.logger.info(`Command ${id} ${cmd.type} ${body.status}${body.error ? `: ${body.error}` : ''} in ${Date.now() - t0}ms`);
             return this.apiClient.postCommandResult(id, this.watcherId, body);

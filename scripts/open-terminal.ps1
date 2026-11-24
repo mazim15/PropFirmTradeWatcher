@@ -73,10 +73,11 @@ try {
 
   $step = 'login'
   $deadline = (Get-Date).AddSeconds($WaitSec); $outcome = $null
+  # Other failures (no connection) are retried by the terminal, so keep waiting on those.
   do {
     Start-Sleep -Seconds 2
     $outcome = Login-Outcome (New-Lines $logDir $before) $Login
-  } while ($outcome -ne 'ok' -and $outcome -notlike 'failed:*' -and (Get-Date) -lt $deadline)
+  } while ($outcome -ne 'ok' -and $outcome -notmatch '(?i)^failed:.*invalid (account|password)' -and (Get-Date) -lt $deadline)
   if ($outcome -eq 'ok') { $res.ok = $true }
   elseif ($outcome) { throw ($outcome -replace '^failed: ', '') }
   else { throw 'Opened, but no login was confirmed' }

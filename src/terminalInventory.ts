@@ -24,12 +24,15 @@ export async function openTerminal(login: string, deps: {
   start(exe: string, login: string): Promise<AttachResult>;
   /** Posts a fresh inventory, so the board's button is gone before the command's result lands. */
   post(): Promise<unknown>;
+  /** True when the command waited so long that the server is about to give up on it. */
+  expired(): boolean;
 }): Promise<AttachResult> {
+  if (deps.expired()) return { ok: false, step: 'start', error: 'PC was busy, press Open again' };
   const mine = (await deps.inventory()).filter(t => t.login === login);
-  if (mine.some(t => t.running)) return { ok: true, step: null, error: null };
   if (!mine.length) return { ok: false, step: 'find', error: `No closed terminal for ${login}` };
   const newest = mine.reduce((a, b) => ((Date.parse(b.lastUsed) || 0) > (Date.parse(a.lastUsed) || 0) ? b : a));
   try {
+    if (mine.some(t => t.running)) return { ok: true, step: null, error: null };
     return await deps.start(newest.path, login);
   } finally {
     await deps.post();

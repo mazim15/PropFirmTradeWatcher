@@ -13,6 +13,7 @@ function fakes(...scans: TerminalEntry[][]) {
       inventory: async () => scans.length > 1 ? scans.shift()! : scans[0],
       start: async (path: string, login: string) => { started.push([path, login]); return { ok: true, step: null, error: null }; },
       post: async () => { posts++; },
+      expired: () => false,
     },
   };
 }
@@ -27,6 +28,14 @@ test('starts the closed terminal holding the login, newest used first, then post
 test('never starts a second copy when the login already runs', async () => {
   const f = fakes([term(), term({ path: 'D:\\x', running: true })]);
   assert.equal((await openTerminal('12150589', f.deps)).ok, true);
+  assert.deepEqual(f.started, []);
+  assert.equal(f.posts(), 1); // so the button goes
+});
+
+test('a command that waited too long is not started late', async () => {
+  const f = fakes([term()]);
+  f.deps.expired = () => true;
+  assert.deepEqual(await openTerminal('12150589', f.deps), { ok: false, step: 'start', error: 'PC was busy, press Open again' });
   assert.deepEqual(f.started, []);
 });
 
