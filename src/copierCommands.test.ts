@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { countOpenRows, dispatch, goldClosed, openPositionsIn, setLotFromInput, startCommandPoller, type DispatchDeps, type SetInputArgs, type SetInputResult, type SetLotResult, type WatcherCommand } from './copierCommands';
 
 const cmd = (p: Partial<WatcherCommand> = {}): WatcherCommand => ({
@@ -354,4 +357,24 @@ test("attach sender ignores only the server's other-account tickets", async () =
   deps.openPositions = async (_l, ignore) => { seen.push(ignore); return 0; };
   await dispatch(both({ action: 'attachSender', otherTickets: ['1'] }), deps);
   assert.deepEqual(seen, [undefined, ['1']]);
+});
+
+test('attach both: an exporter file from before the attach does not prove the account is flat', async () => {
+  const { deps, calls } = fakes({ kept: 'C:\\k.set' });
+  const sinces: Array<number | undefined> = [];
+  const t0 = Date.now();
+  deps.openPositions = async (login, _i, since) => { if (login === '12150589') sinces.push(since); return 0; };
+  await dispatch(both(), deps);
+  assert.ok(sinces.length >= 2 && sinces.every(s => s !== undefined && s >= t0));
+  assert.equal(calls.posted[0].body.status, 'done');
+});
+
+test('openPositionsIn ignores a file older than `since`', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'op-'));
+  const f = path.join(dir, 'open_trades_7_latest.csv');
+  fs.writeFileSync(f, 'Ticket,X\n');
+  const m = fs.statSync(f).mtimeMs;
+  assert.equal(openPositionsIn([dir], '7', m + 1000), 0);
+  assert.equal(openPositionsIn([dir], '7', m + 1000, [], m + 1), null);
+  fs.rmSync(dir, { recursive: true });
 });

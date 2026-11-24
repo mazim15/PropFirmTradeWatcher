@@ -158,9 +158,9 @@ function Find-Leaf($m, $text) {
 }
 
 function Expert-Count($p) {
-  if (No-Experts $p.MainWindowHandle) { return 0 }
+  if (No-Experts $main) { return 0 }
   $before = Dialogs $p.Id
-  [void]$W::PostMessage($p.MainWindowHandle, 0x0111, [IntPtr]33015, $Z)  # Charts -> Expert List
+  [void]$W::PostMessage($main, 0x0111, [IntPtr]33015, $Z)  # Charts -> Expert List
   $l = New-Dialog $p.Id $before 3 'Experts'
   if ($l -eq $Z) { throw 'Expert List did not open' }
   $n = [int]$W::SendMessage($W::GetDlgItem($l, 10309), 0x1004, $Z, $Z)  # LVM_GETITEMCOUNT
@@ -247,10 +247,22 @@ try {
   $stamp = [guid]::NewGuid().ToString('N')
 
   # 1. find: the terminal, its menu items, and how many EAs it runs now.
-  $p = @(Get-Process terminal64 -ErrorAction SilentlyContinue |
-    Where-Object { $_.MainWindowHandle -ne $Z -and (T $_.MainWindowHandle) -match "^\s*$Login\b" }) | Select-Object -First 1
-  if (!$p) { throw "no MT5 terminal for login $Login" }
-  $main = $p.MainWindowHandle
+  # By window class, not Process.MainWindowHandle: that is just the process's first visible unowned
+  # window, so a passing popup can stand in for the terminal. Retried, since a miss right after the
+  # exporter was attached once failed a whole attach.
+  $main = $Z; $seen = @()
+  $deadline = (Get-Date).AddSeconds(10)
+  do {
+    $seen = @(); $h = $Z
+    while (($h = $W::FindWindowEx($Z, $h, 'MetaQuotes::MetaTrader::5.00', [NullString]::Value)) -ne $Z) {
+      $title = T $h; $seen += "'$title'"
+      if ($title -match "^\s*$Login\b") { $main = $h; break }
+    }
+    if ($main -eq $Z) { Start-Sleep -Milliseconds 500 }
+  } while ($main -eq $Z -and (Get-Date) -lt $deadline)
+  if ($main -eq $Z) { throw "no MT5 terminal for login $Login; saw $($seen -join ', ')" }
+  $wp = 0; [void]$W::GetWindowThreadProcessId($main, [ref]$wp)
+  $p = Get-Process -Id $wp
   Unminimize $main
   $menu = $W::GetMenu($main)
   $mdi = $W::FindWindowEx($main, $Z, 'MDIClient', [NullString]::Value)
