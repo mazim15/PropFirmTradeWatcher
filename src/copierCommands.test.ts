@@ -13,7 +13,7 @@ const failInput = (step: string, error: string): SetInputResult => ({ ok: false,
 
 function fakes(o: { open?: Record<string, number | null>; setLot?: SetLotResult; setInput?: SetInputResult[]; kept?: string | null; openTerminal?: { ok: boolean; step: string | null; error: string | null } } = {}) {
   const calls = { setLot: 0, rescan: 0, order: [] as string[], posted: [] as Array<{ id: string; body: { status: string; result?: object; error?: string } }>,
-                  setInput: [] as SetInputArgs[], attach: [] as Array<Parameters<DispatchDeps['runAttach']>[0]>, opened: [] as string[] };
+                  setInput: [] as SetInputArgs[], attach: [] as Array<Parameters<DispatchDeps['runAttach']>[0]>, opened: [] as string[], waits: 0 };
   const inputs = [...(o.setInput ?? [])];
   const deps: DispatchDeps = {
     openPositions: async login => (o.open && login in o.open ? o.open[login] : 0),
@@ -21,6 +21,7 @@ function fakes(o: { open?: Record<string, number | null>; setLot?: SetLotResult;
     runSetInput: async a => { calls.setInput.push(a); return inputs.shift() ?? okInput(a.set); },
     runAttach: async a => { calls.attach.push(a); return { ok: true, step: null, error: null }; },
     runOpenTerminal: async login => { calls.opened.push(login); return o.openTerminal ?? { ok: true, step: null, error: null }; },
+    wait: async () => { calls.waits++; },
     keptSenderSet: () => (o.kept === undefined ? null : o.kept),
     rescan: async () => { calls.rescan++; calls.order.push('rescan'); },
     postResult: async (id, body) => { calls.posted.push({ id, body }); calls.order.push('post'); return true; },
@@ -218,10 +219,6 @@ test('attach sender passes the kept settings file when there is one', async () =
   await dispatch(repair('attachSender', { newChannel: 'Areeb' }), kept.deps);
   assert.deepEqual(kept.calls.attach, [{ login: '12150589', ea: 'sender', channel: 'Areeb', baseSet: 'C:\\sets\\12150589-sender.set' }]);
   assert.equal(kept.calls.rescan, 1);
-  const none = fakes({ kept: null });
-  await dispatch(repair('attachSender', { newChannel: 'Areeb' }), none.deps);
-  assert.equal(none.calls.attach[0].baseSet, undefined);
-  assert.equal(none.calls.rescan, 1);
 });
 
 test('point sender with an open trade fails without running a script', async () => {
@@ -313,4 +310,48 @@ test('open terminal refuses a non-digit account number', async () => {
   }
   assert.deepEqual(calls.opened, []);
   assert.ok(calls.posted.every(p => p.body.error === 'Bad command payload'));
+});
+
+const both = (extra: Partial<WatcherCommand['payload']> = {}) => cmd({ type: 'repair',
+  payload: { accountNumber: '12150589', action: 'attachBoth', propLogin: '12150589', brokerLogin: '13003534', newChannel: 'FN2', ...extra } });
+
+test('attach both: exporter first, then the sender once its trade data is back', async () => {
+  const { deps, calls } = fakes({ kept: 'C:\\k.set' });
+  let reads = 0;
+  deps.openPositions = async login => (login === '12150589' && reads++ < 2 ? null : 0); // exporter's first file takes a moment
+  await dispatch(both(), deps);
+  assert.deepEqual(calls.attach.map(a => a.ea), ['exporter', 'sender']);
+  assert.equal(calls.posted[0].body.status, 'done');
+  assert.ok(calls.waits > 0);
+});
+
+test('attach both: an open trade keeps the sender off but the exporter stays', async () => {
+  const { deps, calls } = fakes({ kept: 'C:\\k.set', open: { '12150589': 1 } });
+  await dispatch(both(), deps);
+  assert.deepEqual(calls.attach.map(a => a.ea), ['exporter']);
+  assert.deepEqual(calls.posted[0].body, { status: 'failed', error: 'exporter attached; sender: Open trade or no fresh trade data' });
+});
+
+test('attach both: no trade data in time keeps the sender off', async () => {
+  const { deps, calls } = fakes({ kept: 'C:\\k.set', open: { '12150589': null } });
+  await dispatch(both(), deps);
+  assert.deepEqual(calls.attach.map(a => a.ea), ['exporter']);
+  assert.equal(calls.posted[0].body.status, 'failed');
+});
+
+test('a sender without kept settings is refused before anything is attached', async () => {
+  for (const action of ['attachSender', 'attachBoth'] as const) {
+    const { deps, calls } = fakes({ kept: null });
+    await dispatch(both({ action }), deps);
+    assert.deepEqual(calls.attach, []);
+    assert.equal(calls.posted[0].body.error, 'No saved sender settings on this PC');
+  }
+});
+
+test("attach sender ignores only the server's other-account tickets", async () => {
+  const { deps } = fakes({ kept: 'C:\\k.set' });
+  const seen: Array<string[] | undefined> = [];
+  deps.openPositions = async (_l, ignore) => { seen.push(ignore); return 0; };
+  await dispatch(both({ action: 'attachSender', otherTickets: ['1'] }), deps);
+  assert.deepEqual(seen, [undefined, ['1']]);
 });

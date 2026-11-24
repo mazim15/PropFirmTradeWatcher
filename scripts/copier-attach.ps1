@@ -1,11 +1,17 @@
 # Attach the trade exporter or the FX Blue TradeCopy Sender to an MT5 terminal, on a new chart.
 #
-# Writes a chart template holding the EA as the terminal's Templates\default.tpl, which MT5 applies
+# Exporter: writes a chart template holding the EA as the terminal's Templates\default.tpl, which MT5 applies
 # to every new chart, opens a new XAUUSD chart (File -> New Chart -> ... -> XAUUSD, found by menu
 # text), and puts the previous default.tpl back at once. No dialog is involved: Insert -> Experts
-# only lists the 5 most recently used EAs, and MT5's Save Template dialog ignores the typed name. The
-# sender's inputs are -BaseSet when given (the last good settings kept by the scan), else the EA's
-# defaults, with Channel set to -Channel. Checks the Expert List grew by exactly one, then
+# only lists the 5 most recently used EAs, and MT5's Save Template dialog ignores the typed name.
+#
+# Sender: MT5 refuses its DLLs when it arrives through a template, but not on a reopened chart. So: a
+# blank XAUUSD chart is opened (through an EA-free default.tpl) and closed, MT5 writes it to
+# Profiles\deleted\NN.chr and lists it first in File -> Open Deleted, the sender (inputs from -BaseSet,
+# Channel from -Channel, expertmode 4) is written into that file, and the chart is reopened from there.
+# A file MT5 didn't write itself is never listed, hence the blank chart.
+#
+# Both: checks the Expert List grew by exactly one, then
 # File -> Profiles -> Save. Always a new chart: one chart holds one EA, so attaching to an existing
 # chart would replace it. On any failure every dialog this run opened is cancelled, default.tpl is
 # restored, and a chart it opened that got no EA is closed.
@@ -182,6 +188,48 @@ function Data-Folder($installDir) {
   $installDir  # portable mode: data lives in the install folder
 }
 
+function Read-Shared($p) {
+  $fs = [IO.File]::Open($p, 'Open', 'Read', 'ReadWrite, Delete')
+  try { (New-Object IO.StreamReader($fs, [Text.Encoding]::Default, $true)).ReadToEnd() } finally { $fs.Dispose() }
+}
+# File -> Open Deleted, refreshed: menus are filled when their popup opens.
+function Deleted-Menu($main) {
+  $menu = $W::GetMenu($main)
+  for ($i = 0; $i -lt $W::GetMenuItemCount($menu); $i++) {
+    if ((Menu-Text $menu $i) -ne 'File') { continue }
+    $file = $W::GetSubMenu($menu, $i)
+    [void]$W::SendMessage($main, 0x0117, $file, [IntPtr]$i); Start-Sleep -Milliseconds 200  # WM_INITMENUPOPUP
+    for ($k = 0; $k -lt $W::GetMenuItemCount($file); $k++) {
+      $sub = $W::GetSubMenu($file, $k)
+      if ($sub -ne $Z -and (Menu-Text $file $k) -eq 'Open Deleted') {
+        [void]$W::SendMessage($main, 0x0117, $sub, [IntPtr]$k); Start-Sleep -Milliseconds 200
+        return $sub
+      }
+    }
+  }
+  $Z
+}
+# The EA on a chart, by its properties dialog's title (F7, always cancelled); '' without one.
+function EA-Title($p, $mdi, $f) {
+  [void]$W::SendMessage($mdi, 0x0222, $f, $Z); Start-Sleep -Milliseconds 400  # WM_MDIACTIVATE
+  $before = Dialogs $p.Id
+  [void]$W::PostMessage($f, 0x0100, [IntPtr]0x76, [IntPtr]0x00410001)
+  [void]$W::PostMessage($f, 0x0101, [IntPtr]0x76, [IntPtr]0xC0410001)
+  $dlg = New-Dialog $p.Id $before 2
+  if ($dlg -eq $Z) { return '' }
+  $title = T $dlg; Cancel-Dialog $dlg; $title
+}
+function Open-NewChart($main, $mdi, $id) {
+  $before = Frames $mdi
+  [void]$W::PostMessage($main, 0x0111, [IntPtr][int]$id, $Z)
+  $t0 = Get-Date
+  # Frames returns its list as one pipeline object, so assign it before filtering.
+  do { Start-Sleep -Milliseconds 300; $now = Frames $mdi; $new = $now | Where-Object { $before -notcontains $_ } | Select-Object -First 1 }
+  while (!$new -and ((Get-Date) - $t0).TotalSeconds -lt 5)
+  if ($new) { $new } else { $Z }
+}
+
+$chrFile = $null; $chrOrig = $null
 $props = $Z; $mdi = $Z; $newChart = $Z; $attached = $false; $tplFile = $null; $tplBackup = $null; $swapped = $false
 # Put back the default.tpl this run replaced (or remove the one it wrote). Safe to call twice.
 function Restore-DefaultTemplate {
@@ -192,7 +240,10 @@ function Restore-DefaultTemplate {
 }
 try {
   if ($Login -notmatch '^\d+$') { throw 'bad -Login' }
-  if ($Expert -eq 'sender' -and $Channel -notmatch '^[A-Za-z0-9_-]{1,32}$') { throw 'sender needs a valid -Channel' }
+  if ($Expert -eq 'sender') {
+    if ($Channel -notmatch '^[A-Za-z0-9_-]{1,32}$') { throw 'sender needs a valid -Channel' }
+    if (!$BaseSet -or !(Test-Path -LiteralPath $BaseSet)) { throw 'sender needs its kept settings (-BaseSet)' }
+  }
   $stamp = [guid]::NewGuid().ToString('N')
 
   # 1. find: the terminal, its menu items, and how many EAs it runs now.
@@ -212,20 +263,28 @@ try {
   $tplFile = Join-Path $dataDir 'MQL5\Profiles\Templates\default.tpl'
   $tplBackup = "$tplFile.copier-$stamp"
   $count0 = Expert-Count $p
+  if ($Expert -eq 'sender') {
+    $charts = Frames $mdi
+    $active = $W::SendMessage($mdi, 0x0229, $Z, $Z)
+    foreach ($f in $charts) { if ((EA-Title $p $mdi $f) -match 'TradeCopy Sender') { throw 'a sender is already attached' } }
+    if ($active -ne $Z) { [void]$W::SendMessage($mdi, 0x0222, $active, $Z) }
+  }
 
   # 2. template: default.tpl with the EA, so the next new chart gets it.
   $step = 'template'
   if ($Expert -eq 'exporter') {
     $inputs = $EXPORTER_INPUTS
   } else {
-    $lines = if ($BaseSet -and (Test-Path $BaseSet)) { [IO.File]::ReadAllText($BaseSet) -split "`r?`n" } else { @() }
+    $lines = [IO.File]::ReadAllText($BaseSet) -split "`r?`n"
     # .set values may end in ||min||step||max||flag; a template holds the value only.
     $inputs = @($lines | Where-Object { $_ -match '^\w+=' -and $_ -notmatch '^Channel=' } | ForEach-Object { ($_ -split '\|\|')[0] })
     $inputs = @("Channel=$Channel") + $inputs
   }
-  $tpl = (@('<chart>', 'symbol=XAUUSD', 'period_type=1', 'period_size=1', 'mode=1', '',
-      '<expert>', "name=$($EA_NAME[$Expert])", "path=Experts\$($EA_NAME[$Expert]).ex5", "expertmode=$($EA_MODE[$Expert])", '<inputs>') +
-    $inputs + @('</inputs>', '</expert>', '', '<window>', 'height=100', '', '<indicator>', 'name=Main', 'path=', 'apply=1', 'show_data=1',
+  $block = @('<expert>', "name=$($EA_NAME[$Expert])", "path=Experts\$($EA_NAME[$Expert]).ex5", "expertmode=$($EA_MODE[$Expert])", '<inputs>') +
+    $inputs + @('</inputs>', '</expert>', '')
+  $inTpl = if ($Expert -eq 'exporter') { $block } else { @() }
+  $tpl = (@('<chart>', 'symbol=XAUUSD', 'period_type=1', 'period_size=1', 'mode=1', '') +
+    $inTpl + @('<window>', 'height=100', '', '<indicator>', 'name=Main', 'path=', 'apply=1', 'show_data=1',
       '</indicator>', '</window>', '</chart>', '')) -join "`r`n"
   if (Test-Path $tplFile) { Move-Item $tplFile $tplBackup -Force }
   $swapped = $true
@@ -233,15 +292,35 @@ try {
 
   # 3. chart: a new XAUUSD chart, which MT5 builds from default.tpl.
   $step = 'chart'
-  $before = Frames $mdi
-  [void]$W::PostMessage($main, 0x0111, [IntPtr][int]$chartId, $Z)
-  $t0 = Get-Date
-  # Frames returns its list as one pipeline object, so assign it before filtering.
-  do { Start-Sleep -Milliseconds 300; $now = Frames $mdi; $newChart = $now | Where-Object { $before -notcontains $_ } | Select-Object -First 1 }
-  while (!$newChart -and ((Get-Date) - $t0).TotalSeconds -lt 5)
-  if (!$newChart) { $newChart = $Z; throw 'new chart did not open' }
+  $newChart = Open-NewChart $main $mdi $chartId
+  if ($newChart -eq $Z) { throw 'new chart did not open' }
   Start-Sleep 3  # let the EA start
   Restore-DefaultTemplate
+  if ($Expert -eq 'sender') {
+    $step = 'reopen'
+    $title = T $newChart
+    $delDir = Join-Path $dataDir 'MQL5\Profiles\deleted'
+    $had = @{}
+    foreach ($f in @(Get-ChildItem $delDir -Filter '*.chr' -ErrorAction SilentlyContinue)) { $had[$f.Name] = $f.LastWriteTimeUtc }
+    [void]$W::PostMessage($newChart, 0x0112, [IntPtr]0xF060, $Z)  # SC_CLOSE: MT5 keeps it as a deleted chart
+    $t0 = Get-Date; while ($W::IsWindow($newChart) -and ((Get-Date) - $t0).TotalSeconds -lt 5) { Start-Sleep -Milliseconds 200 }
+    if ($W::IsWindow($newChart)) { throw 'blank chart did not close' }
+    $newChart = $Z
+    Start-Sleep 1
+    $wrote = @(Get-ChildItem $delDir -Filter '*.chr' | Where-Object { !$had.ContainsKey($_.Name) -or $had[$_.Name] -ne $_.LastWriteTimeUtc })
+    if ($wrote.Count -ne 1) { throw "expected one new deleted chart, found $($wrote.Count)" }
+    $orig = Read-Shared $wrote[0].FullName
+    $at = $orig.IndexOf('<window>')
+    if ($orig -match '<expert>' -or $orig -notmatch '(?m)^symbol=XAUUSD\s*$' -or $at -lt 0) { throw 'the deleted chart is not the blank XAUUSD chart' }
+    $del = Deleted-Menu $main
+    if ($del -eq $Z -or (Menu-Text $del 0) -ne $title) { throw "File/Open Deleted does not list $title first" }
+    $reopenId = $W::GetMenuItemID($del, 0)
+    $chrOrig = $orig; $chrFile = $wrote[0].FullName
+    [IO.File]::WriteAllText($chrFile, $orig.Insert($at, (($block -join "`r`n") + "`r`n")), [Text.Encoding]::Unicode)
+    $newChart = Open-NewChart $main $mdi $reopenId
+    if ($newChart -eq $Z) { throw 'the chart did not reopen' }
+    Start-Sleep 5  # let the sender start, or MT5 drop it
+  }
   $extra = New-Dialog $p.Id (Dialogs $p.Id) 1
   if ($extra -ne $Z) { throw "unexpected dialog after opening the chart: '$(T $extra)'" }
 
@@ -250,6 +329,7 @@ try {
   $count1 = Expert-Count $p
   if ($count1 -gt $count0) { $attached = $true }
   if ($count1 -ne $count0 + 1) { throw "Expert List has $count1 EAs, expected $($count0 + 1)" }
+  if ($Expert -eq 'sender' -and (EA-Title $p $mdi $newChart) -notmatch 'TradeCopy Sender') { throw 'the new chart has no sender' }
 
   # 5. persist
   $step = 'persist'
@@ -265,6 +345,8 @@ try {
 } finally {
   foreach ($h in $opened) { Cancel-Dialog $h }
   Restore-DefaultTemplate
+  # A failed sender must not wait in the deleted-charts file for someone to reopen it.
+  if (!$res.ok -and !$attached -and $chrFile) { try { [IO.File]::WriteAllText($chrFile, $chrOrig, [Text.Encoding]::Unicode) } catch { } }
   # A chart this run opened that never got its EA is closed again.
   if (!$attached -and $newChart -ne $Z -and $W::IsWindow($newChart)) { [void]$W::SendMessage($mdi, 0x0221, $newChart, $Z) }  # WM_MDIDESTROY
   Reminimize

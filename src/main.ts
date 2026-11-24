@@ -336,6 +336,7 @@ class TradeWatcherApp {
             post: () => this.postTerminals(),
             expired: () => Date.now() - receivedAt > 90_000,
           })),
+          wait: ms => new Promise(resolve => setTimeout(resolve, ms)),
           keptSenderSet: login => keptSenderSetPath(login),
           // After an open, scan once things settle: the terminal is still loading its EAs, and a scan
           // (minutes) queued now would hold up the next terminal being opened.

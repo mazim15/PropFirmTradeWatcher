@@ -11,7 +11,7 @@ import * as path from 'path';
 
 // Copied from the web app's app/utils/copierCommands.ts.
 export type CommandType = 'setReceiverLot' | 'rescan' | 'renameChannel' | 'repair' | 'openTerminal';
-export type RepairAction = 'attachExporter' | 'attachSender' | 'pointSender' | 'invertOn';
+export type RepairAction = 'attachExporter' | 'attachSender' | 'attachBoth' | 'pointSender' | 'invertOn';
 export type CommandStatus = 'queued' | 'claimed' | 'done' | 'failed' | 'expired';
 export type WatcherCommand = {
   id: string; watcherId: string; type: CommandType; status: CommandStatus;
@@ -49,6 +49,7 @@ export type DispatchDeps = {
   runOpenTerminal(login: string): Promise<AttachResult>;
   /** The sender settings the last scan kept for this login, or null. */
   keptSenderSet(login: string): string | null;
+  wait(ms: number): Promise<void>;
   rescan(): Promise<void>;
   postResult: (id: string, body: ResultBody) => Promise<boolean>;
 };
@@ -102,12 +103,25 @@ async function repair(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBo
   }
   if (!brokerLogin) return BAD_PAYLOAD;
   const needs = action === 'invertOn' ? channel : newChannel;
-  if (!needs || (action !== 'attachSender' && action !== 'pointSender' && action !== 'invertOn')) return BAD_PAYLOAD;
-  // Pointing or attaching a sender takes over a receiver that may hold another account's trade.
-  if (!(await flat(deps, propLogin, brokerLogin, action === 'invertOn' ? cmd.payload.otherTickets : undefined))) return OPEN_TRADE;
-  if (action === 'attachSender') {
-    const r = await deps.runAttach({ login: propLogin, ea: 'sender', channel: needs, baseSet: deps.keptSenderSet(propLogin) ?? undefined });
-    return r.ok ? { status: 'done' } : { status: 'failed', error: why(r) };
+  if (!needs || (action !== 'attachSender' && action !== 'attachBoth' && action !== 'pointSender' && action !== 'invertOn')) return BAD_PAYLOAD;
+  const attaching = action === 'attachSender' || action === 'attachBoth';
+  const baseSet = attaching ? deps.keptSenderSet(propLogin) : null;
+  if (attaching && !baseSet) return { status: 'failed', error: 'No saved sender settings on this PC' };
+  // The flat check needs the exporter's file, so the exporter goes first and its first file is awaited.
+  const said = action === 'attachBoth' ? 'exporter attached; sender: ' : '';
+  if (action === 'attachBoth') {
+    const r = await deps.runAttach({ login: propLogin, ea: 'exporter' });
+    if (!r.ok) return { status: 'failed', error: `exporter: ${why(r)}` };
+    for (let i = 0; i < 18 && (await deps.openPositions(propLogin)) === null; i++) await deps.wait(5000);
+  }
+  // Pointing a sender takes over a receiver that may hold another account's trade, so nothing is ignored there.
+  // For an attach the server sends tickets to ignore only when it is the account's own last channel.
+  if (!(await flat(deps, propLogin, brokerLogin, action === 'pointSender' ? undefined : cmd.payload.otherTickets))) {
+    return { ...OPEN_TRADE, error: said + OPEN_TRADE.error };
+  }
+  if (attaching) {
+    const r = await deps.runAttach({ login: propLogin, ea: 'sender', channel: needs, baseSet: baseSet ?? undefined });
+    return r.ok ? { status: 'done' } : { status: 'failed', error: said + why(r) };
   }
   const r = action === 'pointSender'
     ? await deps.runSetInput({ role: 'sender', login: propLogin, set: { Channel: needs } })
