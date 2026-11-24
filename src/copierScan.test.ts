@@ -61,3 +61,11 @@ test('toEndpoints keeps a failed terminal with its error and no EA rows', () => 
   assert.equal(rows[0].role, 'terminal');
   assert.equal(rows[0].error, 'MDIClient not found');
 });
+
+test('the terminal row carries the kept sender channel', () => {
+  const raw = { scannedAt: '2026-11-24T00:00:00Z', terminals: [
+    { kind: 'mt5' as const, path: 'p', dataFolder: 'd', login: '1', error: null, eas: [], keptChannel: 'FN2' },
+    { kind: 'mt5' as const, path: 'q', dataFolder: 'e', login: '2', error: null, eas: [] },
+  ] };
+  assert.deepEqual(toEndpoints(raw, 'w', 'pc').map(e => e.channel), ['FN2', null]);
+});

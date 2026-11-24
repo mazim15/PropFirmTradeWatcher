@@ -19,6 +19,8 @@ export type ScanOutput = {
   terminals: Array<{
     kind: 'mt4' | 'mt5'; path: string; dataFolder: string; login: string; error: string | null;
     eas: Array<{ title: string; set: string | null }>;
+    /** Channel in the sender settings kept from this login's last scan that had a sender. */
+    keptChannel?: string | null;
   }>;
 };
 
@@ -54,7 +56,7 @@ export function toEndpoints(raw: ScanOutput, watcherId: string, pc: string): Cop
       login: t.login.trim(), scannedAt: raw.scannedAt,
     };
     const empty = { channel: null, lot: null, invert: null, hbAlert: null };
-    rows.push({ ...base, ...empty, role: 'terminal', error: t.error });
+    rows.push({ ...base, ...empty, channel: t.keptChannel ?? null, role: 'terminal', error: t.error });
     for (const ea of t.eas) {
       const role = roleOf(ea.title);
       if (!role) continue;

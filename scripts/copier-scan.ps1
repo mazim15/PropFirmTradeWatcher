@@ -232,7 +232,15 @@ try {
       $opened.Clear()
       Reminimize
     }
-    $terminals.Add([ordered]@{ kind = $kind; path = $installDir; dataFolder = $dataFolder; login = $login; error = $err; eas = $eas })
+    $kept = $null
+    try {
+      $keptFile = Join-Path $keepDir "$login-sender.set"
+      if ($login -and (Test-Path $keptFile)) {
+        $m = [regex]::Match([IO.File]::ReadAllText($keptFile), '(?m)^Channel=([A-Za-z0-9_-]+)')
+        if ($m.Success) { $kept = $m.Groups[1].Value }
+      }
+    } catch { }
+    $terminals.Add([ordered]@{ kind = $kind; path = $installDir; dataFolder = $dataFolder; login = $login; error = $err; eas = $eas; keptChannel = $kept })
   }
 } catch {
   $terminals.Add([ordered]@{ kind = 'mt4'; path = ''; dataFolder = ''; login = ''; error = "scan failed: $($_.Exception.Message)"; eas = @() })
