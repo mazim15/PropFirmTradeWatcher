@@ -4,6 +4,7 @@ import { Logger } from './logger';
 import { explainSymbol, SymbolResolution, SymbolMap } from './symbolNormaliser';
 import { EndpointStats, EndpointSnapshot } from './endpointStats';
 import type { CopierEndpoint } from './copierScan';
+import type { TerminalEntry } from './terminalInventory';
 import type { ResultBody, WatcherCommand } from './copierCommands';
 
 // Retry transient failures (network errors, 5xx). Don't retry 4xx — those
@@ -451,6 +452,17 @@ export class ApiClient {
       return response.status === 200;
     } catch (error) {
       this.logger.warn(`postCopierScan failed: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
+  /** Posts this PC's installed terminals (every minute, so no retry). */
+  public async postTerminals(watcherId: string, pc: string, terminals: TerminalEntry[]): Promise<boolean> {
+    try {
+      const response = await this.axiosInstance.post('/api/watcher/terminals', { watcherId, pc, terminals });
+      return response.status === 200;
+    } catch (error) {
+      this.logger.debug(`postTerminals failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }

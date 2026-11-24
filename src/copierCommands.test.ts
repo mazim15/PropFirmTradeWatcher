@@ -11,15 +11,16 @@ const cmd = (p: Partial<WatcherCommand> = {}): WatcherCommand => ({
 const okInput = (set: Record<string, string>): SetInputResult => ({ ok: true, before: {}, after: set, chartFile: null, step: null, error: null });
 const failInput = (step: string, error: string): SetInputResult => ({ ok: false, before: null, after: null, chartFile: null, step, error });
 
-function fakes(o: { open?: Record<string, number | null>; setLot?: SetLotResult; setInput?: SetInputResult[]; kept?: string | null } = {}) {
+function fakes(o: { open?: Record<string, number | null>; setLot?: SetLotResult; setInput?: SetInputResult[]; kept?: string | null; openTerminal?: { ok: boolean; step: string | null; error: string | null } } = {}) {
   const calls = { setLot: 0, rescan: 0, order: [] as string[], posted: [] as Array<{ id: string; body: { status: string; result?: object; error?: string } }>,
-                  setInput: [] as SetInputArgs[], attach: [] as Array<Parameters<DispatchDeps['runAttach']>[0]> };
+                  setInput: [] as SetInputArgs[], attach: [] as Array<Parameters<DispatchDeps['runAttach']>[0]>, opened: [] as string[] };
   const inputs = [...(o.setInput ?? [])];
   const deps: DispatchDeps = {
     openPositions: async login => (o.open && login in o.open ? o.open[login] : 0),
     runSetLot: async () => { calls.setLot++; return o.setLot ?? { ok: true, oldLot: 0.23, newLot: 0.24, chartFile: 'chart06.chr', step: null, error: null }; },
     runSetInput: async a => { calls.setInput.push(a); return inputs.shift() ?? okInput(a.set); },
     runAttach: async a => { calls.attach.push(a); return { ok: true, step: null, error: null }; },
+    runOpenTerminal: async login => { calls.opened.push(login); return o.openTerminal ?? { ok: true, step: null, error: null }; },
     keptSenderSet: () => (o.kept === undefined ? null : o.kept),
     rescan: async () => { calls.rescan++; calls.order.push('rescan'); },
     postResult: async (id, body) => { calls.posted.push({ id, body }); calls.order.push('post'); return true; },
@@ -289,4 +290,27 @@ test('point sender still needs the whole broker login flat', async () => {
   const { seen, done } = asked('repair', { action: 'pointSender', propLogin: '12150589', brokerLogin: '13003534', newChannel: 'A', otherTickets: ['9'] });
   await done;
   assert.equal(seen['13003534'], undefined);
+});
+
+test('open terminal reports done and rescans', async () => {
+  const { deps, calls } = fakes();
+  await dispatch(cmd({ type: 'openTerminal', payload: { accountNumber: '12150589' } }), deps);
+  assert.deepEqual(calls.opened, ['12150589']);
+  assert.equal(calls.posted[0].body.status, 'done');
+  assert.equal(calls.rescan, 1);
+});
+
+test('open terminal passes on why the login failed', async () => {
+  const { deps, calls } = fakes({ openTerminal: { ok: false, step: 'login', error: 'authorization on X failed (Invalid account)' } });
+  await dispatch(cmd({ type: 'openTerminal', payload: { accountNumber: '12150589' } }), deps);
+  assert.deepEqual(calls.posted[0].body, { status: 'failed', error: 'login: authorization on X failed (Invalid account)' });
+});
+
+test('open terminal refuses a non-digit account number', async () => {
+  const { deps, calls } = fakes();
+  for (const accountNumber of [undefined, '', '12 & calc', 'C:\\x.exe']) {
+    await dispatch(cmd({ type: 'openTerminal', payload: { accountNumber } }), deps);
+  }
+  assert.deepEqual(calls.opened, []);
+  assert.ok(calls.posted.every(p => p.body.error === 'Bad command payload'));
 });

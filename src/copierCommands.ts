@@ -10,7 +10,7 @@ import * as path from 'path';
  */
 
 // Copied from the web app's app/utils/copierCommands.ts.
-export type CommandType = 'setReceiverLot' | 'rescan' | 'renameChannel' | 'repair';
+export type CommandType = 'setReceiverLot' | 'rescan' | 'renameChannel' | 'repair' | 'openTerminal';
 export type RepairAction = 'attachExporter' | 'attachSender' | 'pointSender' | 'invertOn';
 export type CommandStatus = 'queued' | 'claimed' | 'done' | 'failed' | 'expired';
 export type WatcherCommand = {
@@ -45,6 +45,8 @@ export type DispatchDeps = {
   runSetLot(channel: string, lot: number): Promise<SetLotResult>;
   runSetInput(args: SetInputArgs): Promise<SetInputResult>;
   runAttach(args: AttachArgs): Promise<AttachResult>;
+  /** Starts this login's closed terminal and waits for it to log in. */
+  runOpenTerminal(login: string): Promise<AttachResult>;
   /** The sender settings the last scan kept for this login, or null. */
   keptSenderSet(login: string): string | null;
   rescan(): Promise<void>;
@@ -122,6 +124,12 @@ async function run(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBody>
   }
   if (cmd.type === 'renameChannel') return renameChannel(cmd, deps);
   if (cmd.type === 'repair') return repair(cmd, deps);
+  if (cmd.type === 'openTerminal') {
+    const login = cmd.payload.accountNumber;
+    if (!login || !/^\d+$/.test(login)) return BAD_PAYLOAD;
+    const r = await deps.runOpenTerminal(login);
+    return r.ok ? { status: 'done' } : { status: 'failed', error: why(r) };
+  }
   if (cmd.type !== 'setReceiverLot') return { status: 'failed', error: 'Unknown command' };
   const { propLogin, brokerLogin, channel, lot } = cmd.payload;
   if (!propLogin || !brokerLogin || !channel || typeof lot !== 'number') return BAD_PAYLOAD;
@@ -131,12 +139,12 @@ async function run(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBody>
   return { status: 'failed', error: why(r) };
 }
 
-/** Commands that change a copier EA, so the board needs a fresh scan afterwards. */
-const CHANGES: ReadonlySet<CommandType> = new Set(['setReceiverLot', 'renameChannel', 'repair']);
+/** Commands that change a copier EA or start a terminal, so the board needs a fresh scan afterwards. */
+const CHANGES: ReadonlySet<CommandType> = new Set(['setReceiverLot', 'renameChannel', 'repair', 'openTerminal']);
 
 /**
  * Runs one command and posts its outcome. Never retries; a throw becomes `failed`.
- * After any change attempt (lot, rename, repair), whatever the outcome, it rescans so the
+ * After any change attempt (lot, rename, repair, open), whatever the outcome, it rescans so the
  * board shows the real state. The result is posted first and the rescan isn't awaited: a scan can take
  * minutes, and the poller must stay free to claim the next command before it expires.
  */
