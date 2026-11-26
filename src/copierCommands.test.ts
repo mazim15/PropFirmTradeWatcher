@@ -54,20 +54,20 @@ test('set lot with no fresh trade data fails without running the script', async 
   assert.equal(calls.posted[0].body.status, 'failed');
 });
 
-test('set lot success posts done with old and new lot, then rescans', async () => {
+test('set lot success posts done with old and new lot and does not rescan', async () => {
   const { deps, calls } = fakes();
   await dispatch(cmd(), deps);
   assert.equal(calls.setLot, 1);
   assert.deepEqual(calls.posted, [{ id: 'c1', body: { status: 'done', result: { oldLot: 0.23, newLot: 0.24 } } }]);
-  assert.deepEqual(calls.order, ['post', 'rescan']); // result first: a scan can take minutes
+  assert.deepEqual(calls.order, ['post']); // only the Rescan button scans
 });
 
-test('set lot read-back mismatch posts failed with the step and still rescans', async () => {
+test('set lot read-back mismatch posts failed with the step', async () => {
   const { deps, calls } = fakes({ setLot: { ok: false, oldLot: 0.23, newLot: 0.23, chartFile: null, step: 'read-back', error: 'READ-BACK MISMATCH' } });
   await dispatch(cmd(), deps);
   assert.equal(calls.posted[0].body.status, 'failed');
   assert.equal(calls.posted[0].body.error, 'read-back: READ-BACK MISMATCH');
-  assert.equal(calls.rescan, 1);
+  assert.equal(calls.rescan, 0);
   assert.equal(calls.setLot, 1); // never retried
 });
 
@@ -103,16 +103,6 @@ test('countOpenRows counts data rows after the header', () => {
   assert.equal(countOpenRows(head), 0);
   assert.equal(countOpenRows(head + '123,2026.11.21,buy,0.1,XAUUSD,1,0,0,1,0,0,0,,Open,0\n\n'), 1);
   assert.equal(countOpenRows('garbage'), null);
-});
-
-test('set lot does not wait for the follow-up rescan, so the poller can claim the next command', async () => {
-  const { deps, calls } = fakes();
-  let finishScan: () => void = () => undefined;
-  deps.rescan = () => { calls.rescan++; return new Promise<void>(r => { finishScan = r; }); };
-  await dispatch(cmd(), deps); // would hang if it awaited the scan
-  assert.equal(calls.rescan, 1);
-  assert.equal(calls.posted[0].body.status, 'done');
-  finishScan();
 });
 
 test('openPositionsIn: fresh file required while gold is open, last file trusted while closed', () => {
@@ -174,7 +164,7 @@ test('rename changes the receiver then the sender', async () => {
     { role: 'sender', login: '12150589', set: { Channel: 'FN2T' } },
   ]);
   assert.equal(calls.posted[0].body.status, 'done');
-  assert.equal(calls.rescan, 1);
+  assert.equal(calls.rescan, 0);
 });
 
 test('rename restores the receiver when the sender fails', async () => {
@@ -183,14 +173,14 @@ test('rename restores the receiver when the sender fails', async () => {
   assert.deepEqual(calls.setInput[2], { role: 'receiver', channel: 'FN2T', set: { Channel: 'FN2' } });
   assert.equal(calls.posted[0].body.status, 'failed');
   assert.equal(calls.posted[0].body.error, 'sender: find: Expert List did not open (receiver restored)');
-  assert.equal(calls.rescan, 1);
+  assert.equal(calls.rescan, 0);
 });
 
 test('rename reports a mismatch when the restore also fails', async () => {
   const { deps, calls } = fakes({ setInput: [okInput({ Channel: 'FN2T' }), failInput('ok', 'x'), failInput('find', 'y')] });
   await dispatch(rename(), deps);
   assert.equal(calls.posted[0].body.error, 'MISMATCH: receiver FN2T, sender FN2');
-  assert.equal(calls.rescan, 1);
+  assert.equal(calls.rescan, 0);
 });
 
 test('rename fails on the receiver step without touching the sender', async () => {
@@ -198,7 +188,7 @@ test('rename fails on the receiver step without touching the sender', async () =
   await dispatch(rename(), deps);
   assert.equal(calls.setInput.length, 1);
   assert.equal(calls.posted[0].body.error, 'receiver: find: no receiver with channel FN2');
-  assert.equal(calls.rescan, 1);
+  assert.equal(calls.rescan, 0);
 });
 
 test('rename with an open trade fails without running a script', async () => {
@@ -206,7 +196,7 @@ test('rename with an open trade fails without running a script', async () => {
   await dispatch(rename(), deps);
   assert.equal(calls.setInput.length, 0);
   assert.equal(calls.posted[0].body.error, 'Open trade or no fresh trade data');
-  assert.equal(calls.rescan, 1);
+  assert.equal(calls.rescan, 0);
 });
 
 test('attach exporter runs even with an open trade', async () => {
@@ -214,14 +204,14 @@ test('attach exporter runs even with an open trade', async () => {
   await dispatch(repair('attachExporter'), deps);
   assert.deepEqual(calls.attach, [{ login: '12150589', ea: 'exporter' }]);
   assert.equal(calls.posted[0].body.status, 'done');
-  assert.equal(calls.rescan, 1);
+  assert.equal(calls.rescan, 0);
 });
 
 test('attach sender passes the kept settings file when there is one', async () => {
   const kept = fakes({ kept: 'C:\\sets\\12150589-sender.set' });
   await dispatch(repair('attachSender', { newChannel: 'Areeb' }), kept.deps);
   assert.deepEqual(kept.calls.attach, [{ login: '12150589', ea: 'sender', channel: 'Areeb', baseSet: 'C:\\sets\\12150589-sender.set' }]);
-  assert.equal(kept.calls.rescan, 1);
+  assert.equal(kept.calls.rescan, 0);
 });
 
 test('point sender with an open trade fails without running a script', async () => {
@@ -229,19 +219,19 @@ test('point sender with an open trade fails without running a script', async () 
   await dispatch(repair('pointSender', { newChannel: 'Areeb' }), deps);
   assert.equal(calls.setInput.length, 0);
   assert.equal(calls.posted[0].body.status, 'failed');
-  assert.equal(calls.rescan, 1);
+  assert.equal(calls.rescan, 0);
 });
 
 test('point sender sets the sender channel; invert on sets the receiver', async () => {
   const a = fakes();
   await dispatch(repair('pointSender', { newChannel: 'Areeb' }), a.deps);
   assert.deepEqual(a.calls.setInput, [{ role: 'sender', login: '12150589', set: { Channel: 'Areeb' } }]);
-  assert.equal(a.calls.rescan, 1);
+  assert.equal(a.calls.rescan, 0);
   const b = fakes();
   await dispatch(repair('invertOn', { channel: 'FN2' }), b.deps);
   assert.deepEqual(b.calls.setInput, [{ role: 'receiver', channel: 'FN2', set: { InvertTrades: 'true' } }]);
   assert.equal(b.calls.posted[0].body.status, 'done');
-  assert.equal(b.calls.rescan, 1);
+  assert.equal(b.calls.rescan, 0);
 });
 
 test('rename restores the receiver when its own step fails after the change went live', async () => {
@@ -253,7 +243,7 @@ test('rename restores the receiver when its own step fails after the change went
     { role: 'receiver', channel: 'FN2T', set: { Channel: 'FN2' } },
   ]);
   assert.equal(calls.posted[0].body.error, 'receiver: persist: no chart file (receiver restored)');
-  assert.equal(calls.rescan, 1);
+  assert.equal(calls.rescan, 0);
 });
 
 test('rename reports a mismatch when a live receiver change cannot be restored', async () => {
@@ -297,7 +287,7 @@ test('open terminal reports done and rescans', async () => {
   await dispatch(cmd({ type: 'openTerminal', payload: { accountNumber: '12150589' } }), deps);
   assert.deepEqual(calls.opened, ['12150589']);
   assert.equal(calls.posted[0].body.status, 'done');
-  assert.equal(calls.rescan, 1);
+  assert.equal(calls.rescan, 0);
 });
 
 test('open terminal passes on why the login failed', async () => {

@@ -155,14 +155,10 @@ async function run(cmd: WatcherCommand, deps: DispatchDeps): Promise<ResultBody>
   return { status: 'failed', error: why(r) };
 }
 
-/** Commands that change a copier EA or start a terminal, so the board needs a fresh scan afterwards. */
-const CHANGES: ReadonlySet<CommandType> = new Set(['setReceiverLot', 'renameChannel', 'repair', 'openTerminal']);
-
 /**
  * Runs one command and posts its outcome. Never retries; a throw becomes `failed`.
- * After any change attempt (lot, rename, repair, open), whatever the outcome, it rescans so the
- * board shows the real state. The result is posted first and the rescan isn't awaited: a scan can take
- * minutes, and the poller must stay free to claim the next command before it expires.
+ * Only a `rescan` command scans: a change touches one terminal, and a full scan of every
+ * terminal after it is the owner's call (the board's Rescan button).
  */
 export async function dispatch(cmd: WatcherCommand, deps: DispatchDeps): Promise<void> {
   let body: ResultBody;
@@ -172,7 +168,6 @@ export async function dispatch(cmd: WatcherCommand, deps: DispatchDeps): Promise
     body = { status: 'failed', error: error instanceof Error ? error.message : String(error) };
   }
   await deps.postResult(cmd.id, body);
-  if (CHANGES.has(cmd.type)) void deps.rescan().catch(() => undefined);
 }
 
 /** Polls every `everyMs`; runs the returned commands one at a time, oldest first, and skips a tick while busy. */

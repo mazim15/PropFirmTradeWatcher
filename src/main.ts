@@ -38,7 +38,6 @@ class TradeWatcherApp {
   private stopCommandPoller: (() => void) | null = null;
   /** Scans and lot changes both drive MT4/MT5 dialogs, so they run one after another. */
   private commandsReceivedAt = 0;
-  private openRescan: NodeJS.Timeout | null = null;
   private copierQueue: Promise<unknown> = Promise.resolve();
   private registrationRetryTimeout: NodeJS.Timeout | null = null;
   /** Drives the staleness alarm and the tray colour. */
@@ -324,7 +323,6 @@ class TradeWatcherApp {
       async cmd => {
         const t0 = Date.now();
         const receivedAt = this.commandsReceivedAt;
-        if (cmd.type === 'openTerminal' && this.openRescan) clearTimeout(this.openRescan);
         this.logger.info(`Command ${cmd.id} ${cmd.type} started`);
         await dispatch(cmd, {
           openPositions: async (login, ignore, since) => openPositionsIn(this.store.get('watchFolders') as string[], login, Date.now(), ignore, since),
@@ -340,13 +338,7 @@ class TradeWatcherApp {
           })),
           wait: ms => new Promise(resolve => setTimeout(resolve, ms)),
           keptSenderSet: login => keptSenderSetPath(login),
-          // After an open, scan once things settle: the terminal is still loading its EAs, and a scan
-          // (minutes) queued now would hold up the next terminal being opened.
-          rescan: async () => {
-            if (cmd.type !== 'openTerminal') return this.copierScan();
-            if (this.openRescan) clearTimeout(this.openRescan);
-            this.openRescan = setTimeout(() => void this.copierScan(), 5_000);
-          },
+          rescan: () => this.copierScan(),
           postResult: async (id, body) => {
             this.logger.info(`Command ${id} ${cmd.type} ${body.status}${body.error ? `: ${body.error}` : ''} in ${Date.now() - t0}ms`);
             return this.apiClient.postCommandResult(id, this.watcherId, body);
